@@ -27,6 +27,17 @@ link_into_node() {
   fi
 }
 
+link_header_to_existing_classes() {
+  local header_dir="$1"
+  shift
+
+  for class_dir in "$@"; do
+    [[ -d "$class_dir" ]] || continue
+    rm -f "$class_dir/main" || true
+    ln -s "$header_dir" "$class_dir/main" || true
+  done
+}
+
 if [[ ! -d "$CONFIGFS" ]]; then
   echo "configfs 未挂载，先执行: mount -t configfs none /sys/kernel/config" >&2
   exit 1
@@ -37,17 +48,11 @@ if [[ -d "$GADGET_DIR" ]]; then
     echo "" > "$GADGET_DIR/UDC" 2>/dev/null || true
   fi
 
-  # configfs 下很多属性节点不可直接 rm，清理我们创建过的符号链接即可。
+  # configfs 下很多节点是内核导出的目录或属性，不能直接 rm。
+  # 这里只清理我们可能创建过的符号链接，避免报错刷屏。
   rm -f "$GADGET_DIR/configs/c.1/uvc.0" || true
-  rm -f "$GADGET_DIR/functions/uvc.0/control/class/fs" || true
-  rm -f "$GADGET_DIR/functions/uvc.0/control/class/hs" || true
-  rm -f "$GADGET_DIR/functions/uvc.0/control/class/ss" || true
   rm -f "$GADGET_DIR/functions/uvc.0/control/class/fs/main" || true
-  rm -f "$GADGET_DIR/functions/uvc.0/control/class/hs/main" || true
   rm -f "$GADGET_DIR/functions/uvc.0/control/class/ss/main" || true
-  rm -f "$GADGET_DIR/functions/uvc.0/streaming/class/fs" || true
-  rm -f "$GADGET_DIR/functions/uvc.0/streaming/class/hs" || true
-  rm -f "$GADGET_DIR/functions/uvc.0/streaming/class/ss" || true
   rm -f "$GADGET_DIR/functions/uvc.0/streaming/class/fs/main" || true
   rm -f "$GADGET_DIR/functions/uvc.0/streaming/class/hs/main" || true
   rm -f "$GADGET_DIR/functions/uvc.0/streaming/class/ss/main" || true
@@ -74,17 +79,17 @@ mkdir -p functions/uvc.0/control/class
 mkdir -p functions/uvc.0/streaming/header
 mkdir -p functions/uvc.0/streaming/class
 mkdir -p functions/uvc.0/streaming/uncompressed/mjpeg/720p
-mkdir -p functions/uvc.0/control/class/fs
-mkdir -p functions/uvc.0/control/class/hs
-mkdir -p functions/uvc.0/control/class/ss
-mkdir -p functions/uvc.0/streaming/class/fs
-mkdir -p functions/uvc.0/streaming/class/hs
-mkdir -p functions/uvc.0/streaming/class/ss
 
-link_into_node "$GADGET_DIR/functions/uvc.0/control/header/main" "$GADGET_DIR/functions/uvc.0/control/class/fs"
-link_into_node "$GADGET_DIR/functions/uvc.0/control/header/main" "$GADGET_DIR/functions/uvc.0/control/class/hs"
-link_into_node "$GADGET_DIR/functions/uvc.0/streaming/header/main" "$GADGET_DIR/functions/uvc.0/streaming/class/fs"
-link_into_node "$GADGET_DIR/functions/uvc.0/streaming/header/main" "$GADGET_DIR/functions/uvc.0/streaming/class/hs"
+link_header_to_existing_classes \
+  "$GADGET_DIR/functions/uvc.0/control/header/main" \
+  "$GADGET_DIR/functions/uvc.0/control/class/fs" \
+  "$GADGET_DIR/functions/uvc.0/control/class/ss"
+
+link_header_to_existing_classes \
+  "$GADGET_DIR/functions/uvc.0/streaming/header/main" \
+  "$GADGET_DIR/functions/uvc.0/streaming/class/fs" \
+  "$GADGET_DIR/functions/uvc.0/streaming/class/hs" \
+  "$GADGET_DIR/functions/uvc.0/streaming/class/ss"
 
 # 下面的节点在不同内核版本里名字可能略有差异，保留最常见配置。
 echo 1280 > functions/uvc.0/streaming/uncompressed/mjpeg/720p/wWidth || true
