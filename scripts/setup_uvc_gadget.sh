@@ -10,6 +10,7 @@ MODPROBE="${MODPROBE:-modprobe}"
 CONFIGFS=/sys/kernel/config
 GADGET_DIR="$CONFIGFS/usb_gadget/rk3588_uvc"
 UDC_NAME=""
+UVC_FUNC="uvc.usb0"
 
 set_usb_device_role() {
   local role_path
@@ -55,22 +56,22 @@ link_into_node() {
 
 link_uvc_function() {
   # configfs is picky about how function links are created; try common forms.
-  rm -f "$GADGET_DIR/configs/c.1/uvc.0" 2>/dev/null || true
+    rm -f "$GADGET_DIR/configs/c.1/f1" 2>/dev/null || true
 
-  ln -s functions/uvc.0 "$GADGET_DIR/configs/c.1/" 2>/dev/null || true
-  [[ -L "$GADGET_DIR/configs/c.1/uvc.0" ]] && return 0
-
-  (
-    cd "$GADGET_DIR"
-    ln -s functions/uvc.0 configs/c.1/ 2>/dev/null || true
-  )
-  [[ -L "$GADGET_DIR/configs/c.1/uvc.0" ]] && return 0
+    ln -s "functions/$UVC_FUNC" "$GADGET_DIR/configs/c.1/f1" 2>/dev/null || true
+    [[ -L "$GADGET_DIR/configs/c.1/f1" ]] && return 0
 
   (
     cd "$GADGET_DIR"
-    ln -s "$(pwd)/functions/uvc.0" configs/c.1/uvc.0 2>/dev/null || true
+      ln -s "functions/$UVC_FUNC" configs/c.1/f1 2>/dev/null || true
   )
-  [[ -L "$GADGET_DIR/configs/c.1/uvc.0" ]] && return 0
+    [[ -L "$GADGET_DIR/configs/c.1/f1" ]] && return 0
+
+  (
+    cd "$GADGET_DIR"
+      ln -s "$(pwd)/functions/$UVC_FUNC" configs/c.1/f1 2>/dev/null || true
+  )
+    [[ -L "$GADGET_DIR/configs/c.1/f1" ]] && return 0
 
   return 1
 }
@@ -88,12 +89,12 @@ if [[ -d "$GADGET_DIR" ]]; then
   # configfs 下很多节点是内核导出的目录或属性，不能直接 rm。
   # 这里只清理我们可能创建过的符号链接，避免报错刷屏。
   rm -f "$GADGET_DIR/configs/c.1/uvc.0" || true
-  rm -f "$GADGET_DIR/functions/uvc.0/control/class/fs/main" || true
-  rm -f "$GADGET_DIR/functions/uvc.0/control/class/ss/main" || true
-  rm -f "$GADGET_DIR/functions/uvc.0/streaming/class/fs/main" || true
-  rm -f "$GADGET_DIR/functions/uvc.0/streaming/class/hs/main" || true
-  rm -f "$GADGET_DIR/functions/uvc.0/streaming/class/ss/main" || true
-  rm -f "$GADGET_DIR/functions/uvc.0/streaming/header/main" || true
+  rm -f "$GADGET_DIR/functions/$UVC_FUNC/control/class/fs/main" || true
+  rm -f "$GADGET_DIR/functions/$UVC_FUNC/control/class/ss/main" || true
+  rm -f "$GADGET_DIR/functions/$UVC_FUNC/streaming/class/fs/main" || true
+  rm -f "$GADGET_DIR/functions/$UVC_FUNC/streaming/class/hs/main" || true
+  rm -f "$GADGET_DIR/functions/$UVC_FUNC/streaming/class/ss/main" || true
+  rm -f "$GADGET_DIR/functions/$UVC_FUNC/streaming/header/main" || true
 fi
 
 set_usb_device_role
@@ -114,19 +115,19 @@ echo "0001" > strings/0x409/serialnumber
 echo "UVC gadget configuration" > configs/c.1/strings/0x409/configuration
 echo 120 > configs/c.1/MaxPower
 
-mkdir -p functions/uvc.0/control/header/main
-mkdir -p functions/uvc.0/control/class
-mkdir -p functions/uvc.0/streaming/header
-mkdir -p functions/uvc.0/streaming/class
-mkdir -p functions/uvc.0/streaming/uncompressed/mjpeg/720p
+mkdir -p "functions/$UVC_FUNC/control/header/main"
+mkdir -p "functions/$UVC_FUNC/control/class"
+mkdir -p "functions/$UVC_FUNC/streaming/header"
+mkdir -p "functions/$UVC_FUNC/streaming/class"
+mkdir -p "functions/$UVC_FUNC/streaming/uncompressed/mjpeg/720p"
 
 # 下面的节点在不同内核版本里名字可能略有差异，保留最常见配置。
-echo 1280 > functions/uvc.0/streaming/uncompressed/mjpeg/720p/wWidth || true
-echo 720 > functions/uvc.0/streaming/uncompressed/mjpeg/720p/wHeight || true
-echo 333333 > functions/uvc.0/streaming/uncompressed/mjpeg/720p/dwFrameInterval || true
-echo 1843200 > functions/uvc.0/streaming/uncompressed/mjpeg/720p/dwMaxVideoFrameBufferSize || true
+echo 1280 > "functions/$UVC_FUNC/streaming/uncompressed/mjpeg/720p/wWidth" || true
+echo 720 > "functions/$UVC_FUNC/streaming/uncompressed/mjpeg/720p/wHeight" || true
+echo 333333 > "functions/$UVC_FUNC/streaming/uncompressed/mjpeg/720p/dwFrameInterval" || true
+echo 1843200 > "functions/$UVC_FUNC/streaming/uncompressed/mjpeg/720p/dwMaxVideoFrameBufferSize" || true
 if ! link_uvc_function; then
-  echo "无法把 functions/uvc.0 链接到 configs/c.1，UVC 配置不完整。" >&2
+  echo "无法把 functions/$UVC_FUNC 链接到 configs/c.1，UVC 配置不完整。" >&2
   exit 1
 fi
 
