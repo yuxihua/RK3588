@@ -47,6 +47,33 @@ TRACKING_STATE = TrackingState()
 random.seed()
 
 
+def get_haarcascade_dir() -> Path:
+    candidates = []
+
+    cv2_data = getattr(cv2, "data", None)
+    if cv2_data is not None:
+        cascade_root = getattr(cv2_data, "haarcascades", "")
+        if cascade_root:
+            candidates.append(Path(cascade_root))
+
+    cv2_module_dir = Path(cv2.__file__).resolve().parent
+    candidates.extend(
+        [
+            cv2_module_dir / "data" / "haarcascades",
+            Path("/usr/share/opencv4/haarcascades"),
+            Path("/usr/share/opencv/haarcascades"),
+            Path("/usr/local/share/opencv4/haarcascades"),
+            Path("/usr/local/share/opencv/haarcascades"),
+        ]
+    )
+
+    for candidate in candidates:
+        if candidate.is_dir():
+            return candidate
+
+    raise RuntimeError("无法找到 OpenCV haarcascade 目录")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="USB camera avatar processor")
     parser.add_argument("--camera", default="/dev/video0", help="Input USB camera device")
@@ -194,7 +221,8 @@ class GpioAvatarSelector:
 
 
 def load_cascade(filename: str) -> cv2.CascadeClassifier:
-    cascade = cv2.CascadeClassifier(cv2.data.haarcascades + filename)
+    cascade_dir = get_haarcascade_dir()
+    cascade = cv2.CascadeClassifier(str(cascade_dir / filename))
     if cascade.empty():
         raise RuntimeError(f"无法加载模型: {filename}")
     return cascade
