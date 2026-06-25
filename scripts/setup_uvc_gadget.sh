@@ -11,6 +11,28 @@ CONFIGFS=/sys/kernel/config
 GADGET_DIR="$CONFIGFS/usb_gadget/rk3588_uvc"
 UDC_NAME=""
 
+set_usb_device_role() {
+  local role_path
+
+  for role_path in \
+    /sys/class/usb_role/*/role \
+    /sys/devices/platform/fc000000.usb/otg_role \
+    /sys/devices/platform/fc000000.usb/role \
+    /sys/kernel/debug/usb/fc000000.usb/mode
+  do
+    [[ -e "$role_path" ]] || continue
+    echo device > "$role_path" 2>/dev/null || echo peripheral > "$role_path" 2>/dev/null || true
+  done
+}
+
+unbind_all_gadgets() {
+  local udc_file
+  for udc_file in "$CONFIGFS"/usb_gadget/*/UDC; do
+    [[ -e "$udc_file" ]] || continue
+    echo "" > "$udc_file" 2>/dev/null || true
+  done
+}
+
 link_into_node() {
   local target="$1"
   local node="$2"
@@ -52,12 +74,8 @@ if [[ -d "$GADGET_DIR" ]]; then
   rm -f "$GADGET_DIR/functions/uvc.0/streaming/header/main" || true
 fi
 
-# Some vendor services may leave another gadget bound to the same UDC.
-# Always unbind all gadgets first to avoid "device or resource busy" when rebinding.
-for udc_file in "$CONFIGFS"/usb_gadget/*/UDC; do
-  [[ -e "$udc_file" ]] || continue
-  echo "" > "$udc_file" 2>/dev/null || true
-done
+set_usb_device_role
+unbind_all_gadgets
 
 $MODPROBE libcomposite
 mkdir -p "$GADGET_DIR"
@@ -93,6 +111,14 @@ if [[ -z "$UDC_NAME" ]]; then
   exit 1
 fi
 
-echo "$UDC_NAME" > UDC
+if ! echo "$UDC_NAME" > UDC 2>/dev/null; then
+  # Retry once after forcing peripheral role and unbinding all gadgets again.
+  set_usb_device_role
+  unbind_all_gadgets
+  if ! echo "$UDC_NAME" > UDC 2>/dev/null; then
+    echo "绑定 UDC 失败: $UDC_NAME（可能仍处于 host 角色或被其它功能占用）" >&2
+    exit 1
+  fi
+fi
 
 echo "UVC gadget 已绑定到: $UDC_NAME"
