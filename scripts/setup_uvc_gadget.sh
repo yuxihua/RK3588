@@ -53,6 +53,28 @@ link_into_node() {
   fi
 }
 
+link_uvc_function() {
+  # configfs is picky about how function links are created; try common forms.
+  rm -f "$GADGET_DIR/configs/c.1/uvc.0" 2>/dev/null || true
+
+  ln -s functions/uvc.0 "$GADGET_DIR/configs/c.1/" 2>/dev/null || true
+  [[ -L "$GADGET_DIR/configs/c.1/uvc.0" ]] && return 0
+
+  (
+    cd "$GADGET_DIR"
+    ln -s functions/uvc.0 configs/c.1/ 2>/dev/null || true
+  )
+  [[ -L "$GADGET_DIR/configs/c.1/uvc.0" ]] && return 0
+
+  (
+    cd "$GADGET_DIR"
+    ln -s "$(pwd)/functions/uvc.0" configs/c.1/uvc.0 2>/dev/null || true
+  )
+  [[ -L "$GADGET_DIR/configs/c.1/uvc.0" ]] && return 0
+
+  return 1
+}
+
 if [[ ! -d "$CONFIGFS" ]]; then
   echo "configfs 未挂载，先执行: mount -t configfs none /sys/kernel/config" >&2
   exit 1
@@ -103,8 +125,10 @@ echo 1280 > functions/uvc.0/streaming/uncompressed/mjpeg/720p/wWidth || true
 echo 720 > functions/uvc.0/streaming/uncompressed/mjpeg/720p/wHeight || true
 echo 333333 > functions/uvc.0/streaming/uncompressed/mjpeg/720p/dwFrameInterval || true
 echo 1843200 > functions/uvc.0/streaming/uncompressed/mjpeg/720p/dwMaxVideoFrameBufferSize || true
-# configfs function links are more reliable with a relative target.
-link_into_node "functions/uvc.0" "$GADGET_DIR/configs/c.1/uvc.0"
+if ! link_uvc_function; then
+  echo "无法把 functions/uvc.0 链接到 configs/c.1，UVC 配置不完整。" >&2
+  exit 1
+fi
 
 UDC_NAME="$(ls /sys/class/udc | head -n 1)"
 if [[ -z "$UDC_NAME" ]]; then
