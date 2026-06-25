@@ -27,17 +27,6 @@ link_into_node() {
   fi
 }
 
-link_header_to_existing_classes() {
-  local header_dir="$1"
-  shift
-
-  for class_dir in "$@"; do
-    [[ -d "$class_dir" ]] || continue
-    rm -f "$class_dir/main" || true
-    ln -s "$header_dir" "$class_dir/main" || true
-  done
-}
-
 if [[ ! -d "$CONFIGFS" ]]; then
   echo "configfs 未挂载，先执行: mount -t configfs none /sys/kernel/config" >&2
   exit 1
@@ -80,23 +69,11 @@ mkdir -p functions/uvc.0/streaming/header
 mkdir -p functions/uvc.0/streaming/class
 mkdir -p functions/uvc.0/streaming/uncompressed/mjpeg/720p
 
-link_header_to_existing_classes \
-  "$GADGET_DIR/functions/uvc.0/control/header/main" \
-  "$GADGET_DIR/functions/uvc.0/control/class/fs" \
-  "$GADGET_DIR/functions/uvc.0/control/class/ss"
-
-link_header_to_existing_classes \
-  "$GADGET_DIR/functions/uvc.0/streaming/header/main" \
-  "$GADGET_DIR/functions/uvc.0/streaming/class/fs" \
-  "$GADGET_DIR/functions/uvc.0/streaming/class/hs" \
-  "$GADGET_DIR/functions/uvc.0/streaming/class/ss"
-
 # 下面的节点在不同内核版本里名字可能略有差异，保留最常见配置。
 echo 1280 > functions/uvc.0/streaming/uncompressed/mjpeg/720p/wWidth || true
 echo 720 > functions/uvc.0/streaming/uncompressed/mjpeg/720p/wHeight || true
 echo 333333 > functions/uvc.0/streaming/uncompressed/mjpeg/720p/dwFrameInterval || true
 echo 1843200 > functions/uvc.0/streaming/uncompressed/mjpeg/720p/dwMaxVideoFrameBufferSize || true
-ln -s functions/uvc.0/streaming/uncompressed/mjpeg/720p functions/uvc.0/streaming/header/main || true
 link_into_node "$GADGET_DIR/functions/uvc.0" "$GADGET_DIR/configs/c.1/uvc.0"
 
 UDC_NAME="$(ls /sys/class/udc | head -n 1)"
