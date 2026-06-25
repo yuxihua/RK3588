@@ -14,6 +14,10 @@ UDC_NAME=""
 link_into_node() {
   local target="$1"
   local node="$2"
+  local node_parent
+
+  node_parent="$(dirname "$node")"
+  mkdir -p "$node_parent"
 
   if [[ -L "$node" || ( -e "$node" && ! -d "$node" ) ]]; then
     rm -f "$node" || true
@@ -47,6 +51,13 @@ if [[ -d "$GADGET_DIR" ]]; then
   rm -f "$GADGET_DIR/functions/uvc.0/streaming/class/ss/main" || true
   rm -f "$GADGET_DIR/functions/uvc.0/streaming/header/main" || true
 fi
+
+# Some vendor services may leave another gadget bound to the same UDC.
+# Always unbind all gadgets first to avoid "device or resource busy" when rebinding.
+for udc_file in "$CONFIGFS"/usb_gadget/*/UDC; do
+  [[ -e "$udc_file" ]] || continue
+  echo "" > "$udc_file" 2>/dev/null || true
+done
 
 $MODPROBE libcomposite
 mkdir -p "$GADGET_DIR"
