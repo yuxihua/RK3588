@@ -103,7 +103,8 @@ echo 1280 > functions/uvc.0/streaming/uncompressed/mjpeg/720p/wWidth || true
 echo 720 > functions/uvc.0/streaming/uncompressed/mjpeg/720p/wHeight || true
 echo 333333 > functions/uvc.0/streaming/uncompressed/mjpeg/720p/dwFrameInterval || true
 echo 1843200 > functions/uvc.0/streaming/uncompressed/mjpeg/720p/dwMaxVideoFrameBufferSize || true
-link_into_node "$GADGET_DIR/functions/uvc.0" "$GADGET_DIR/configs/c.1/uvc.0"
+# configfs function links are more reliable with a relative target.
+link_into_node "functions/uvc.0" "$GADGET_DIR/configs/c.1/uvc.0"
 
 UDC_NAME="$(ls /sys/class/udc | head -n 1)"
 if [[ -z "$UDC_NAME" ]]; then
