@@ -17,11 +17,19 @@ if [[ ! -d "$CONFIGFS" ]]; then
 fi
 
 if [[ -d "$GADGET_DIR" ]]; then
-  if [[ -f "$GADGET_DIR/UDC" ]]; then
-    echo "" > "$GADGET_DIR/UDC" || true
+  if [[ -e "$GADGET_DIR/UDC" ]]; then
+    echo "" > "$GADGET_DIR/UDC" 2>/dev/null || true
   fi
-  find "$GADGET_DIR" -type l -delete || true
-  rm -rf "$GADGET_DIR"
+
+  # configfs 下很多属性节点不可直接 rm，清理我们创建过的符号链接即可。
+  rm -f "$GADGET_DIR/configs/c.1/uvc.0" || true
+  rm -f "$GADGET_DIR/functions/uvc.0/control/class/fs" || true
+  rm -f "$GADGET_DIR/functions/uvc.0/control/class/hs" || true
+  rm -f "$GADGET_DIR/functions/uvc.0/control/class/ss" || true
+  rm -f "$GADGET_DIR/functions/uvc.0/streaming/class/fs" || true
+  rm -f "$GADGET_DIR/functions/uvc.0/streaming/class/hs" || true
+  rm -f "$GADGET_DIR/functions/uvc.0/streaming/class/ss" || true
+  rm -f "$GADGET_DIR/functions/uvc.0/streaming/header/main" || true
 fi
 
 $MODPROBE libcomposite
