@@ -8,6 +8,7 @@ fi
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALL_ROOT="/opt/rk3588-avatar-gateway"
 SERVICE_FILE="/etc/systemd/system/avatar-gateway.service"
+UVC_SETUP_SERVICE_FILE="/etc/systemd/system/uvc-gadget-setup.service"
 ENV_FILE="/etc/default/avatar-gateway"
 
 install -d /etc/systemd/system
@@ -33,8 +34,8 @@ fi
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=RK3588 USB Avatar Gateway
-After=network.target local-fs.target usbdevice.service
-Requires=usbdevice.service
+After=network.target local-fs.target uvc-gadget-setup.service
+Requires=uvc-gadget-setup.service
 
 [Service]
 Type=simple
@@ -58,7 +59,24 @@ KillSignal=SIGTERM
 WantedBy=multi-user.target
 EOF
 
+cat > "$UVC_SETUP_SERVICE_FILE" <<EOF
+[Unit]
+Description=Setup RK3588 UVC Gadget (ConfigFS)
+After=local-fs.target
+Before=avatar-gateway.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=$INSTALL_ROOT/scripts/setup_uvc_gadget.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 systemctl daemon-reload
+systemctl disable --now usbdevice.service 2>/dev/null || true
+systemctl enable --now uvc-gadget-setup.service
 systemctl enable --now avatar-gateway
 
 echo "已安装并启动 avatar-gateway 服务。"

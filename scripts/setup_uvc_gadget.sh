@@ -96,12 +96,13 @@ if [[ -d "$GADGET_DIR" ]]; then
   # configfs 下很多节点是内核导出的目录或属性，不能直接 rm。
   # 这里只清理我们可能创建过的符号链接，避免报错刷屏。
   rm -f "$GADGET_DIR/configs/c.1/uvc.0" || true
-  rm -f "$GADGET_DIR/functions/$UVC_FUNC/control/class/fs/main" || true
-  rm -f "$GADGET_DIR/functions/$UVC_FUNC/control/class/ss/main" || true
-  rm -f "$GADGET_DIR/functions/$UVC_FUNC/streaming/class/fs/main" || true
-  rm -f "$GADGET_DIR/functions/$UVC_FUNC/streaming/class/hs/main" || true
-  rm -f "$GADGET_DIR/functions/$UVC_FUNC/streaming/class/ss/main" || true
-  rm -f "$GADGET_DIR/functions/$UVC_FUNC/streaming/header/main" || true
+  rm -f "$GADGET_DIR/functions/$UVC_FUNC/control/class/fs/h" || true
+  rm -f "$GADGET_DIR/functions/$UVC_FUNC/control/class/ss/h" || true
+  rm -f "$GADGET_DIR/functions/$UVC_FUNC/streaming/header/h/u" || true
+  rm -f "$GADGET_DIR/functions/$UVC_FUNC/streaming/header/h/m" || true
+  rm -f "$GADGET_DIR/functions/$UVC_FUNC/streaming/class/fs/h" || true
+  rm -f "$GADGET_DIR/functions/$UVC_FUNC/streaming/class/hs/h" || true
+  rm -f "$GADGET_DIR/functions/$UVC_FUNC/streaming/class/ss/h" || true
 fi
 
 set_usb_device_role
@@ -127,17 +128,56 @@ if [[ ! -d "functions/$UVC_FUNC" ]]; then
   mkdir "functions/$UVC_FUNC"
 fi
 
-mkdir -p "functions/$UVC_FUNC/control/header/main"
+mkdir -p "functions/$UVC_FUNC/control/header/h"
 mkdir -p "functions/$UVC_FUNC/control/class"
 mkdir -p "functions/$UVC_FUNC/streaming/header"
 mkdir -p "functions/$UVC_FUNC/streaming/class"
-mkdir -p "functions/$UVC_FUNC/streaming/uncompressed/mjpeg/720p"
+mkdir -p "functions/$UVC_FUNC/streaming/uncompressed/u/240p"
+mkdir -p "functions/$UVC_FUNC/streaming/mjpeg/m/240p"
+mkdir -p "functions/$UVC_FUNC/streaming/color_matching/default"
 
-# 下面的节点在不同内核版本里名字可能略有差异，保留最常见配置。
-echo 1280 > "functions/$UVC_FUNC/streaming/uncompressed/mjpeg/720p/wWidth" || true
-echo 720 > "functions/$UVC_FUNC/streaming/uncompressed/mjpeg/720p/wHeight" || true
-echo 333333 > "functions/$UVC_FUNC/streaming/uncompressed/mjpeg/720p/dwFrameInterval" || true
-echo 1843200 > "functions/$UVC_FUNC/streaming/uncompressed/mjpeg/720p/dwMaxVideoFrameBufferSize" || true
+# Uncompressed YUYV 320x240 @ 15/30 fps
+echo 1 > "functions/$UVC_FUNC/streaming/uncompressed/u/bFormatIndex" || true
+echo 1 > "functions/$UVC_FUNC/streaming/uncompressed/u/bNumFrameDescriptors" || true
+echo YUY2 > "functions/$UVC_FUNC/streaming/uncompressed/u/guidFormat" || true
+echo 16 > "functions/$UVC_FUNC/streaming/uncompressed/u/bBitsPerPixel" || true
+
+echo 1 > "functions/$UVC_FUNC/streaming/uncompressed/u/240p/bFrameIndex" || true
+echo 320 > "functions/$UVC_FUNC/streaming/uncompressed/u/240p/wWidth" || true
+echo 240 > "functions/$UVC_FUNC/streaming/uncompressed/u/240p/wHeight" || true
+echo 1152000 > "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwMinBitRate" || true
+echo 2304000 > "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwMaxBitRate" || true
+echo 153600 > "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwMaxVideoFrameBufferSize" || true
+echo 666666 > "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwDefaultFrameInterval" || true
+cat > "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwFrameInterval" <<'EOF'
+666666
+333333
+EOF
+
+# MJPEG 320x240 @ 15/30 fps
+echo 2 > "functions/$UVC_FUNC/streaming/mjpeg/m/bFormatIndex" || true
+echo 1 > "functions/$UVC_FUNC/streaming/mjpeg/m/bNumFrameDescriptors" || true
+
+echo 1 > "functions/$UVC_FUNC/streaming/mjpeg/m/240p/bFrameIndex" || true
+echo 320 > "functions/$UVC_FUNC/streaming/mjpeg/m/240p/wWidth" || true
+echo 240 > "functions/$UVC_FUNC/streaming/mjpeg/m/240p/wHeight" || true
+echo 1152000 > "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwMinBitRate" || true
+echo 4608000 > "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwMaxBitRate" || true
+echo 153600 > "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwMaxVideoFrameBufferSize" || true
+echo 666666 > "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwDefaultFrameInterval" || true
+cat > "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwFrameInterval" <<'EOF'
+666666
+333333
+EOF
+
+# Link control/streaming headers into class directories.
+ln -s header/h "functions/$UVC_FUNC/control/class/fs/h" 2>/dev/null || true
+ln -s header/h "functions/$UVC_FUNC/control/class/ss/h" 2>/dev/null || true
+ln -s ../../uncompressed/u "functions/$UVC_FUNC/streaming/header/h/u" 2>/dev/null || true
+ln -s ../../mjpeg/m "functions/$UVC_FUNC/streaming/header/h/m" 2>/dev/null || true
+ln -s ../../header/h "functions/$UVC_FUNC/streaming/class/fs/h" 2>/dev/null || true
+ln -s ../../header/h "functions/$UVC_FUNC/streaming/class/hs/h" 2>/dev/null || true
+ln -s ../../header/h "functions/$UVC_FUNC/streaming/class/ss/h" 2>/dev/null || true
 if ! link_uvc_function; then
   echo "无法把 functions/$UVC_FUNC 链接到 configs/c.1，UVC 配置不完整。" >&2
   ls -la "functions" >&2 || true
