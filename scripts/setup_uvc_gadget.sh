@@ -56,22 +56,29 @@ link_into_node() {
 
 link_uvc_function() {
   # configfs is picky about how function links are created; try common forms.
-    rm -f "$GADGET_DIR/configs/c.1/f1" 2>/dev/null || true
+  rm -f "$GADGET_DIR/configs/c.1/$UVC_FUNC" 2>/dev/null || true
+  rm -f "$GADGET_DIR/configs/c.1/f1" 2>/dev/null || true
 
-    ln -s "functions/$UVC_FUNC" "$GADGET_DIR/configs/c.1/f1" 2>/dev/null || true
-    [[ -L "$GADGET_DIR/configs/c.1/f1" ]] && return 0
-
+  # Canonical configfs style: link to the config directory, kernel chooses link name.
   (
     cd "$GADGET_DIR"
-      ln -s "functions/$UVC_FUNC" configs/c.1/f1 2>/dev/null || true
+    ln -s "functions/$UVC_FUNC" "configs/c.1/" 2>/dev/null || true
   )
-    [[ -L "$GADGET_DIR/configs/c.1/f1" ]] && return 0
+  [[ -L "$GADGET_DIR/configs/c.1/$UVC_FUNC" ]] && return 0
 
+  # Some vendor kernels only accept explicit link names like f1.
   (
     cd "$GADGET_DIR"
-      ln -s "$(pwd)/functions/$UVC_FUNC" configs/c.1/f1 2>/dev/null || true
+    ln -s "functions/$UVC_FUNC" "configs/c.1/f1" 2>/dev/null || true
   )
-    [[ -L "$GADGET_DIR/configs/c.1/f1" ]] && return 0
+  [[ -L "$GADGET_DIR/configs/c.1/f1" ]] && return 0
+
+  # Last fallback with absolute target.
+  (
+    cd "$GADGET_DIR"
+    ln -s "$(pwd)/functions/$UVC_FUNC" "configs/c.1/f1" 2>/dev/null || true
+  )
+  [[ -L "$GADGET_DIR/configs/c.1/f1" ]] && return 0
 
   return 1
 }
