@@ -5,7 +5,7 @@ After=network.target local-fs.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/rk3588-avatar-gateway
-ExecStart=/usr/bin/python3 /opt/rk3588-avatar-gateway/scripts/avatar_processor.py --camera /dev/video-camera0 --output /dev/video11 --avatar /opt/rk3588-avatar-gateway/assets/avatar.png --width 1280 --height 720 --fps 30
+ExecStart=/usr/bin/python3 /opt/rk3588-avatar-gateway/scripts/avatar_processor.py --camera /dev/video41 --output /dev/video11 --avatar /opt/rk3588-avatar-gateway/assets/avatar.png --width 1280 --height 720 --fps 30
 Restart=always
 RestartSec=1
 KillSignal=SIGTERM
