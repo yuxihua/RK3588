@@ -330,6 +330,47 @@ def _try_open_ffmpeg_writer(candidate: str, fps: int, width: int, height: int):
     return FfmpegPipeWriter(process, candidate, FrameSpec(width=width, height=height, fps=fps))
 
 
+def _is_likely_uvc_output_node(video_index: int) -> bool:
+    name_file = Path(f"/sys/class/video4linux/video{video_index}/name")
+    try:
+        node_name = name_file.read_text(encoding="utf-8").strip().lower()
+    except OSError:
+        return False
+
+    if "dwc3-gadget" in node_name:
+        return True
+    if "uvc" in node_name and "gadget" in node_name:
+        return True
+    if node_name in {"g_uvc", "uvc-gadget", "uvc gadget"}:
+        return True
+    return False
+
+
+def _list_auto_output_candidates() -> list[str]:
+    output_nodes = []
+    fallback_nodes = []
+
+    for path in Path("/dev").glob("video*"):
+        name = path.name
+        match = re.fullmatch(r"video(\d+)", name)
+        if not match:
+            continue
+
+        index = int(match.group(1))
+        candidate = str(path)
+        if _is_likely_uvc_output_node(index):
+            output_nodes.append((index, candidate))
+        else:
+            fallback_nodes.append((index, candidate))
+
+    output_nodes.sort(key=lambda item: item[0])
+    fallback_nodes.sort(key=lambda item: item[0])
+
+    if output_nodes:
+        return [path for _, path in output_nodes]
+    return [path for _, path in fallback_nodes]
+
+
 def create_writer(device: str, spec: FrameSpec) -> Tuple[object, FrameSpec]:
     preferred = (device or "").strip()
     preferred_is_auto = preferred.lower() == "auto"
@@ -366,15 +407,7 @@ def create_writer(device: str, spec: FrameSpec) -> Tuple[object, FrameSpec]:
         if preferred and not preferred_is_auto:
             candidates.append(preferred)
 
-        auto_candidates = []
-        for path in Path("/dev").glob("video*"):
-            name = path.name
-            match = re.fullmatch(r"video(\d+)", name)
-            if not match:
-                continue
-            auto_candidates.append((int(match.group(1)), str(path)))
-        auto_candidates.sort(key=lambda item: item[0])
-        candidates.extend([path for _, path in auto_candidates])
+        candidates.extend(_list_auto_output_candidates())
 
         unique_candidates = []
         seen = set()
