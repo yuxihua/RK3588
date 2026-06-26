@@ -242,10 +242,16 @@ def create_capture(device: str, spec: FrameSpec) -> cv2.VideoCapture:
 
 def create_writer(device: str, spec: FrameSpec) -> cv2.VideoWriter:
     fourcc = cv2.VideoWriter_fourcc(*"MJPG")
-    writer = cv2.VideoWriter(device, cv2.CAP_V4L2, fourcc, spec.fps, (spec.width, spec.height))
-    if not writer.isOpened():
-        raise RuntimeError(f"无法打开输出设备: {device}")
-    return writer
+
+    last_error = None
+    for _ in range(20):
+        writer = cv2.VideoWriter(device, cv2.CAP_V4L2, fourcc, spec.fps, (spec.width, spec.height))
+        if writer.isOpened():
+            return writer
+        last_error = f"无法打开输出设备: {device}"
+        time.sleep(0.5)
+
+    raise RuntimeError(last_error or f"无法打开输出设备: {device}")
 
 
 def overlay_rgba(background: np.ndarray, foreground: np.ndarray, x: int, y: int, w: int, h: int) -> np.ndarray:
