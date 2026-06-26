@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import os
 import random
+import re
 import signal
 import sys
 import time
@@ -77,7 +78,7 @@ def get_haarcascade_dir() -> Path:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="USB camera avatar processor")
     parser.add_argument("--camera", default="/dev/video0", help="Input USB camera device")
-    parser.add_argument("--output", default="/dev/video11", help="Output UVC gadget device")
+    parser.add_argument("--output", default="auto", help="Output UVC gadget device, or auto")
     parser.add_argument("--avatar", default="", help="PNG avatar with alpha channel")
     parser.add_argument("--avatar-dir", default="", help="Directory that stores selectable avatar PNG files")
     parser.add_argument("--avatar-name", default="", help="Avatar name to load from avatar-dir (without .png)")
@@ -241,17 +242,53 @@ def create_capture(device: str, spec: FrameSpec) -> cv2.VideoCapture:
 
 
 def create_writer(device: str, spec: FrameSpec) -> cv2.VideoWriter:
-    fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+    preferred = (device or "").strip()
+    preferred_is_auto = preferred.lower() == "auto"
+    codec_candidates = ("MJPG", "YUYV")
+    exclude_candidates = set()
 
     last_error = None
     for _ in range(60):
-        writer = cv2.VideoWriter(device, cv2.CAP_V4L2, fourcc, spec.fps, (spec.width, spec.height))
-        if writer.isOpened():
-            return writer
-        last_error = f"无法打开输出设备: {device}"
+        candidates = []
+        if preferred and not preferred_is_auto:
+            candidates.append(preferred)
+
+        auto_candidates = []
+        for path in Path("/dev").glob("video*"):
+            name = path.name
+            match = re.fullmatch(r"video(\d+)", name)
+            if not match:
+                continue
+            auto_candidates.append((int(match.group(1)), str(path)))
+        auto_candidates.sort(key=lambda item: item[0])
+        candidates.extend([path for _, path in auto_candidates])
+
+        unique_candidates = []
+        seen = set()
+        for candidate in candidates:
+            if candidate in seen or candidate in exclude_candidates:
+                continue
+            seen.add(candidate)
+            unique_candidates.append(candidate)
+
+        for candidate in unique_candidates:
+            for codec in codec_candidates:
+                fourcc = cv2.VideoWriter_fourcc(*codec)
+                writer = cv2.VideoWriter(candidate, cv2.CAP_V4L2, fourcc, spec.fps, (spec.width, spec.height))
+                if writer.isOpened():
+                    if preferred_is_auto or candidate != preferred:
+                        print(f"output_auto_selected={candidate} codec={codec}")
+                        sys.stdout.flush()
+                    return writer
+                writer.release()
+                last_error = f"无法打开输出设备: {candidate}"
+                exclude_candidates.add(candidate)
+
         time.sleep(1.0)
 
-    raise RuntimeError(last_error or f"无法打开输出设备: {device}")
+    if preferred and not preferred_is_auto:
+        raise RuntimeError(last_error or f"无法打开输出设备: {preferred}")
+    raise RuntimeError(last_error or "无法自动找到可写输出设备")
 
 
 def overlay_rgba(background: np.ndarray, foreground: np.ndarray, x: int, y: int, w: int, h: int) -> np.ndarray:
