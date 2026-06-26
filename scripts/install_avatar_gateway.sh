@@ -78,6 +78,7 @@ NETWORK_HOST=0.0.0.0
 NETWORK_PORT=8080
 NETWORK_PATH=/mjpeg
 NETWORK_JPEG_QUALITY=85
+FALLBACK_STYLE=normal
 EOF
 fi
 
@@ -98,6 +99,9 @@ if ! grep -q '^NETWORK_PATH=' "$ENV_FILE"; then
 fi
 if ! grep -q '^NETWORK_JPEG_QUALITY=' "$ENV_FILE"; then
   echo 'NETWORK_JPEG_QUALITY=85' >> "$ENV_FILE"
+fi
+if ! grep -q '^FALLBACK_STYLE=' "$ENV_FILE"; then
+  echo 'FALLBACK_STYLE=normal' >> "$ENV_FILE"
 fi
 
 cat > "$SERVICE_FILE" <<EOF
@@ -122,7 +126,8 @@ Environment=OUTPUT_MODE=network
 Environment=OUTPUT_DEVICE=/dev/video43
 ExecStart=/usr/bin/python3 $INSTALL_ROOT/scripts/avatar_processor.py --camera /dev/video41 --output-mode \${OUTPUT_MODE} --output \${OUTPUT_DEVICE} --network-host \${NETWORK_HOST} --network-port \${NETWORK_PORT} --network-path \${NETWORK_PATH} --network-jpeg-quality \${NETWORK_JPEG_QUALITY} --avatar $INSTALL_ROOT/assets/avatar.png --avatar-dir $INSTALL_ROOT/assets/avatars --avatar-name \${AVATAR_NAME} --gpio-avatar-select --gpio0 \${GPIO0_PIN} --gpio1 \${GPIO1_PIN} --avatar-gpio-00 \${AVATAR_GPIO_00} --avatar-gpio-01 \${AVATAR_GPIO_01} --avatar-gpio-10 \${AVATAR_GPIO_10} --avatar-gpio-11 \${AVATAR_GPIO_11} --width 640 --height 360 --fps 15
 Restart=always
-RestartSec=1
+Environment=FALLBACK_STYLE=normal
+ExecStart=/usr/bin/python3 $INSTALL_ROOT/scripts/avatar_processor.py --camera /dev/video41 --output-mode \${OUTPUT_MODE} --output \${OUTPUT_DEVICE} --network-host \${NETWORK_HOST} --network-port \${NETWORK_PORT} --network-path \${NETWORK_PATH} --network-jpeg-quality \${NETWORK_JPEG_QUALITY} --fallback-style \${FALLBACK_STYLE} --avatar $INSTALL_ROOT/assets/avatar.png --avatar-dir $INSTALL_ROOT/assets/avatars --avatar-name \${AVATAR_NAME} --gpio-avatar-select --gpio0 \${GPIO0_PIN} --gpio1 \${GPIO1_PIN} --avatar-gpio-00 \${AVATAR_GPIO_00} --avatar-gpio-01 \${AVATAR_GPIO_01} --avatar-gpio-10 \${AVATAR_GPIO_10} --avatar-gpio-11 \${AVATAR_GPIO_11} --width 640 --height 360 --fps 15
 KillSignal=SIGTERM
 
 [Install]

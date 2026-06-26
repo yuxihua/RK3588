@@ -12,7 +12,8 @@ Environment=NETWORK_HOST=0.0.0.0
 Environment=NETWORK_PORT=8080
 Environment=NETWORK_PATH=/mjpeg
 Environment=NETWORK_JPEG_QUALITY=85
-ExecStart=/usr/bin/python3 /opt/rk3588-avatar-gateway/scripts/avatar_processor.py --camera /dev/video41 --output-mode ${OUTPUT_MODE} --output ${OUTPUT_DEVICE} --network-host ${NETWORK_HOST} --network-port ${NETWORK_PORT} --network-path ${NETWORK_PATH} --network-jpeg-quality ${NETWORK_JPEG_QUALITY} --avatar /opt/rk3588-avatar-gateway/assets/avatar.png --width 640 --height 360 --fps 15
+Environment=FALLBACK_STYLE=normal
+ExecStart=/usr/bin/python3 /opt/rk3588-avatar-gateway/scripts/avatar_processor.py --camera /dev/video41 --output-mode ${OUTPUT_MODE} --output ${OUTPUT_DEVICE} --network-host ${NETWORK_HOST} --network-port ${NETWORK_PORT} --network-path ${NETWORK_PATH} --network-jpeg-quality ${NETWORK_JPEG_QUALITY} --fallback-style ${FALLBACK_STYLE} --avatar /opt/rk3588-avatar-gateway/assets/avatar.png --width 640 --height 360 --fps 15
 Restart=always
 RestartSec=1
 KillSignal=SIGTERM

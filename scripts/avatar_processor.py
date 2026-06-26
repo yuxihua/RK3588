@@ -111,6 +111,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--height", type=int, default=720, help="Frame height")
     parser.add_argument("--fps", type=int, default=30, help="Frame rate")
     parser.add_argument("--mirror", action="store_true", help="Mirror the camera image")
+    parser.add_argument(
+        "--fallback-style",
+        choices=["cartoon", "normal"],
+        default="cartoon",
+        help="Style used when no avatar is loaded",
+    )
     return parser
 
 
@@ -1610,12 +1616,17 @@ def process_frame(
     face_cascade: cv2.CascadeClassifier,
     eye_cascade: cv2.CascadeClassifier,
     mouth_cascade: cv2.CascadeClassifier,
+    fallback_style: str,
 ) -> np.ndarray:
     if avatar is None:
+        if fallback_style == "normal":
+            return frame
         return cartoonize(frame)
 
     state = estimate_pose(frame, face_cascade, eye_cascade, mouth_cascade)
     if state is None:
+        if fallback_style == "normal":
+            return frame
         return cartoonize(frame)
 
     state = update_tracking(state)
@@ -1664,6 +1675,7 @@ def main() -> int:
     print(f"output_fps={output_spec.fps}")
     print(f"avatar={'yes' if avatar is not None else 'no'}")
     print(f"avatar_path={avatar_path or 'none'}")
+    print(f"fallback_style={args.fallback_style}")
     print(f"gpio_avatar_select={'on' if gpio_selector.enabled else 'off'}")
     print("processing_started=true")
     sys.stdout.flush()
@@ -1683,7 +1695,14 @@ def main() -> int:
             now = time.monotonic()
             avatar_path, avatar = gpio_selector.select(now, avatar_path, avatar)
 
-            output_frame = process_frame(frame, avatar, face_cascade, eye_cascade, mouth_cascade)
+            output_frame = process_frame(
+                frame,
+                avatar,
+                face_cascade,
+                eye_cascade,
+                mouth_cascade,
+                args.fallback_style,
+            )
             if output_frame.shape[1] != output_spec.width or output_frame.shape[0] != output_spec.height:
                 output_frame = cv2.resize(output_frame, (output_spec.width, output_spec.height), interpolation=cv2.INTER_AREA)
             try:
