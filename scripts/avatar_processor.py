@@ -295,6 +295,48 @@ class FfmpegPipeWriter:
                 self.process.kill()
 
 
+def _pack_bgr_to_yuyv(frame: np.ndarray) -> bytes:
+    height, width = frame.shape[:2]
+    if width % 2 != 0:
+        raise RuntimeError("YUYV 输出要求宽度为偶数")
+
+    yuv = cv2.cvtColor(frame, cv2.COLOR_BGR2YUV)
+    y_plane = yuv[:, :, 0].astype(np.uint8)
+    u_plane = yuv[:, :, 1].astype(np.uint16)
+    v_plane = yuv[:, :, 2].astype(np.uint16)
+
+    left_y = y_plane[:, 0::2]
+    right_y = y_plane[:, 1::2]
+    avg_u = ((u_plane[:, 0::2] + u_plane[:, 1::2]) // 2).astype(np.uint8)
+    avg_v = ((v_plane[:, 0::2] + v_plane[:, 1::2]) // 2).astype(np.uint8)
+
+    packed = np.empty((height, width // 2, 4), dtype=np.uint8)
+    packed[:, :, 0] = left_y
+    packed[:, :, 1] = avg_u
+    packed[:, :, 2] = right_y
+    packed[:, :, 3] = avg_v
+    return packed.tobytes()
+
+
+class RawDeviceWriter:
+    def __init__(self, device: str, spec: FrameSpec):
+        self.device = device
+        self.spec = spec
+        self.handle = open(device, "wb", buffering=0)
+
+    def write(self, frame: np.ndarray) -> None:
+        frame_to_write = frame
+        if frame_to_write.shape[1] != self.spec.width or frame_to_write.shape[0] != self.spec.height:
+            frame_to_write = cv2.resize(frame_to_write, (self.spec.width, self.spec.height), interpolation=cv2.INTER_AREA)
+        self.handle.write(_pack_bgr_to_yuyv(np.ascontiguousarray(frame_to_write)))
+
+    def release(self) -> None:
+        try:
+            self.handle.close()
+        except Exception:
+            pass
+
+
 def _try_open_cv_writer(candidate: str, codec: str, fps: int, width: int, height: int):
     fourcc = cv2.VideoWriter_fourcc(*codec)
     writer = cv2.VideoWriter(candidate, cv2.CAP_V4L2, fourcc, fps, (width, height))
@@ -397,6 +439,19 @@ def _try_open_ffmpeg_writer(candidate: str, fps: int, width: int, height: int, c
         return None
 
     return FfmpegPipeWriter(process, candidate, FrameSpec(width=width, height=height, fps=fps))
+
+
+def _try_open_raw_writer(candidate: str, fps: int, width: int, height: int, codec: str):
+    if codec.upper() != "YUYV":
+        return None
+    if width != 320 or height != 240:
+        return None
+    if not re.fullmatch(r"/dev/video(\d+)", candidate):
+        return None
+    try:
+        return RawDeviceWriter(candidate, FrameSpec(width=width, height=height, fps=fps))
+    except OSError:
+        return None
 
 
 def _is_likely_uvc_output_node(video_index: int) -> bool:
@@ -538,6 +593,13 @@ def create_writer(device: str, spec: FrameSpec) -> Tuple[object, FrameSpec]:
                                 print(f"output_auto_selected={candidate} method=ffmpeg codec={codec} size={width}x{height} fps={fps}")
                                 sys.stdout.flush()
                             return ffmpeg_writer, FrameSpec(width=width, height=height, fps=fps)
+
+                        raw_writer = _try_open_raw_writer(candidate, fps, width, height, codec)
+                        if raw_writer is not None:
+                            if preferred_is_auto or candidate != preferred or width != spec.width or height != spec.height or fps != spec.fps:
+                                print(f"output_auto_selected={candidate} method=raw codec={codec} size={width}x{height} fps={fps}")
+                                sys.stdout.flush()
+                            return raw_writer, FrameSpec(width=width, height=height, fps=fps)
 
         time.sleep(1.0)
 
