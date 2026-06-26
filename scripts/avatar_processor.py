@@ -51,7 +51,26 @@ class TrackingState:
 STOP_REQUESTED = False
 TRACKING_STATE = TrackingState()
 BUILD_TAG = "2026-06-26-uvc-probe-v2"
+STATIC_STAGE_CACHE: Dict[Tuple[int, int], np.ndarray] = {}
 random.seed()
+
+
+def get_static_stage_bgr(width: int, height: int) -> np.ndarray:
+    key = (int(width), int(height))
+    cached = STATIC_STAGE_CACHE.get(key)
+    if cached is not None:
+        return cached.copy()
+
+    phase = 0.0
+    stage = create_stage_background(width, height, phase)
+    stage = add_vignette(stage)
+    stage = add_grid_overlay(stage, phase)
+    stage = add_side_panels(stage, phase)
+    stage = add_frame_accents(stage, phase)
+    stage = add_bottom_band(stage, phase)
+    stage = apply_cyber_grade(stage, phase)
+    STATIC_STAGE_CACHE[key] = stage[:, :, :3].copy()
+    return STATIC_STAGE_CACHE[key].copy()
 
 
 def get_haarcascade_dir() -> Path:
@@ -1402,7 +1421,9 @@ def animate_avatar_features(avatar_rgba: np.ndarray, blink_progress: float, mout
     animated = avatar_rgba.copy()
     h, w = animated.shape[:2]
     blink = float(np.clip(blink_progress, 0.0, 1.0))
-    mouth = float(np.clip(mouth_open, 0.0, 1.0))
+    mouth_raw = float(np.clip(mouth_open, 0.0, 1.0))
+    # Amplify subtle detector output so mouth motion is visible at 640x360.
+    mouth = float(np.clip((mouth_raw - 0.02) * 2.8, 0.0, 1.0))
 
     eye_box_w = max(12, int(w * 0.24))
     eye_box_h = max(10, int(h * 0.16))
@@ -1423,10 +1444,11 @@ def animate_avatar_features(avatar_rgba: np.ndarray, blink_progress: float, mout
 
         animated[y1:y2, x1:x2] = squeezed
 
-    mouth_box_w = max(16, int(w * 0.30))
+    mouth_box_w = max(18, int(w * 0.26))
     mouth_box_h = max(12, int(h * 0.16))
     mouth_cx = int(w * 0.50)
-    mouth_cy = int(h * 0.73)
+    # Portrait avatars often include torso; place mouth ROI in upper face area.
+    mouth_cy = int(h * 0.52)
     mx1 = max(0, mouth_cx - mouth_box_w // 2)
     mx2 = min(w, mouth_cx + mouth_box_w // 2)
     my1 = max(0, mouth_cy - mouth_box_h // 2)
@@ -1439,7 +1461,7 @@ def animate_avatar_features(avatar_rgba: np.ndarray, blink_progress: float, mout
         top = mouth_roi[:mid, :].copy()
         bottom = mouth_roi[mid:, :].copy()
 
-        shift = max(1, int(roi_h * 0.30 * mouth))
+        shift = max(1, int(roi_h * 0.65 * mouth))
         modified = np.zeros_like(mouth_roi)
         modified[:mid, :] = top
 
@@ -1456,7 +1478,7 @@ def animate_avatar_features(avatar_rgba: np.ndarray, blink_progress: float, mout
             modified[mid:dst_start, :, 2] = 26
             modified[mid:dst_start, :, 3] = gap_alpha
 
-        blend = float(np.clip(0.30 + mouth * 0.52, 0.30, 0.82))
+        blend = float(np.clip(0.52 + mouth * 0.40, 0.52, 0.92))
         mixed = mouth_roi.astype(np.float32) * (1.0 - blend) + modified.astype(np.float32) * blend
         animated[my1:my2, mx1:mx2] = np.clip(mixed, 0, 255).astype(np.uint8)
 
@@ -1547,9 +1569,9 @@ def estimate_pose(
     mouth_region = roi_gray[h // 2 :, :]
     mouths = mouth_cascade.detectMultiScale(
         mouth_region,
-        scaleFactor=1.2,
-        minNeighbors=18,
-        minSize=(max(36, w // 6), max(24, h // 10)),
+        scaleFactor=1.12,
+        minNeighbors=8,
+        minSize=(max(24, w // 8), max(16, h // 12)),
     )
 
     mouth_open = 0.0
@@ -1557,6 +1579,18 @@ def estimate_pose(
         mouths = sorted(mouths, key=lambda item: item[2] * item[3], reverse=True)
         mx, my, mw, mh = (int(value) for value in mouths[0])
         mouth_open = min(1.0, mh / max(1.0, h * 0.24))
+    else:
+        # Fallback heuristic when cascade misses the mouth in low resolution.
+        y1 = int(h * 0.58)
+        y2 = int(h * 0.92)
+        x1 = int(w * 0.20)
+        x2 = int(w * 0.80)
+        lower_roi = roi_gray[y1:y2, x1:x2]
+        if lower_roi.size > 0:
+            blur = cv2.GaussianBlur(lower_roi, (5, 5), 0)
+            _, dark = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+            dark_ratio = float(np.mean(dark > 0))
+            mouth_open = float(np.clip((dark_ratio - 0.14) * 2.4, 0.0, 0.45))
 
     return FaceState(face=face, angle=angle, mouth_open=mouth_open, eye_open=eye_open)
 
@@ -1617,8 +1651,8 @@ def composite_avatar(frame: np.ndarray, avatar: np.ndarray, state: FaceState, no
     x, y, w, h = state.face
     face_center_x = x + w / 2.0
     face_center_y = y + h * 0.40
-    phase = now
-    sway = 4.0 * np.sin(phase * 1.1)
+    phase = 0.0
+    sway = 0.0
 
     head_w = int(w * 2.10)
     head_h = int(h * (2.25 + state.mouth_open * 0.10))
@@ -1629,26 +1663,10 @@ def composite_avatar(frame: np.ndarray, avatar: np.ndarray, state: FaceState, no
 
     canvas = create_stage_background(canvas_w, canvas_h, phase)
     canvas = add_vignette(canvas)
-    canvas = add_soft_shadow(canvas, 0, 0, canvas_w, canvas_h, phase)
     canvas = add_grid_overlay(canvas, phase)
     canvas = add_side_panels(canvas, phase)
     canvas = add_frame_accents(canvas, phase)
-    canvas = add_scanlines(canvas, phase)
-    canvas = add_neon_beams(canvas, phase)
-    canvas = add_particle_field(canvas, phase)
-    canvas = add_center_halo(canvas, phase)
-    canvas = add_hud_arcs(canvas, phase)
-    canvas = add_corner_ticks(canvas, phase)
-    canvas = add_glitch_bands(canvas, phase)
-    canvas = add_bloom_glow(canvas, phase)
-    canvas = add_digital_rain(canvas, phase)
-    canvas = add_signal_noise(canvas, phase)
-    canvas = add_vertical_pulses(canvas, phase)
-    canvas = add_plasma_fog(canvas, phase)
     canvas = add_bottom_band(canvas, phase)
-    canvas = add_edge_shimmer(canvas, phase)
-    canvas = add_signal_trail(canvas, phase)
-    canvas = add_scan_sweep(canvas, phase)
     canvas = apply_cyber_grade(canvas, phase)
 
     resized_avatar = cv2.resize(avatar, (head_w, head_h), interpolation=cv2.INTER_AREA)
@@ -1657,7 +1675,7 @@ def composite_avatar(frame: np.ndarray, avatar: np.ndarray, state: FaceState, no
     rotated_avatar = rotate_rgba(animated_avatar, -state.angle * 1.35)
 
     head_x = int((canvas_w - rotated_avatar.shape[1]) / 2.0)
-    head_y = int(h * 0.02 + 3.0 * np.sin(phase * 2.4))
+    head_y = int(h * 0.02)
     if state.mouth_open > 0.25:
         head_y += int((state.mouth_open - 0.25) * h * 0.10)
     head_x += int(sway)
@@ -1665,9 +1683,9 @@ def composite_avatar(frame: np.ndarray, avatar: np.ndarray, state: FaceState, no
     canvas = overlay_rgba(canvas, rotated_avatar, head_x, head_y, rotated_avatar.shape[1], rotated_avatar.shape[0])
 
     body_x = int((canvas_w - body_w) / 2.0)
-    body_y = int(head_h * 0.64 + 3.0 * np.sin(phase * 1.6))
+    body_y = int(head_h * 0.64)
     body_x += int(sway * 0.55)
-    body_layer = create_body_canvas(body_w, body_h, head_h, phase)
+    body_layer = create_body_canvas(body_w, body_h, head_h, 0.0)
     canvas = overlay_rgba(canvas, body_layer, body_x, body_y, body_w, body_h)
 
     outline = np.zeros_like(canvas)
@@ -1677,31 +1695,13 @@ def composite_avatar(frame: np.ndarray, avatar: np.ndarray, state: FaceState, no
     outline = cv2.GaussianBlur(outline, (0, 0), 8)
     canvas[:, :, :3] = np.maximum(canvas[:, :, :3], outline[:, :, :3])
 
-    glow = np.zeros_like(canvas)
-    cv2.ellipse(glow, (canvas_w // 2, body_y + int(body_h * 0.18)), (int(canvas_w * 0.30), int(body_h * 0.22)), 0, 0, 360, (88, 178, 255, 34), -1)
-    cv2.ellipse(glow, (canvas_w // 2, body_y + int(body_h * 0.18)), (int(canvas_w * 0.18), int(body_h * 0.12)), 0, 0, 360, (95, 235, 186, 24), -1)
-    glow = cv2.GaussianBlur(glow, (0, 0), 20)
-    alpha = glow[:, :, 3:4].astype(np.float32) / 255.0
-    canvas[:, :, :3] = (canvas[:, :, :3].astype(np.float32) * (1.0 - alpha) + glow[:, :, :3].astype(np.float32) * alpha).astype(np.uint8)
-
-    canvas = add_lower_third(canvas, phase)
-    canvas = add_chromatic_aberration(canvas, phase)
+    canvas = add_lower_third(canvas, 0.0)
 
     out_x = int(face_center_x - canvas_w / 2.0)
     out_y = int(face_center_y - head_h * 0.54)
 
     if replace_background:
-        bg_phase = now * 0.55
-        stage = create_stage_background(frame.shape[1], frame.shape[0], bg_phase)
-        stage = add_vignette(stage)
-        stage = add_grid_overlay(stage, bg_phase)
-        stage = add_side_panels(stage, bg_phase)
-        stage = add_frame_accents(stage, bg_phase)
-        stage = add_scanlines(stage, bg_phase)
-        stage = add_neon_beams(stage, bg_phase)
-        stage = add_bottom_band(stage, bg_phase)
-        stage = apply_cyber_grade(stage, bg_phase)
-        stage_bgr = stage[:, :, :3].copy()
+        stage_bgr = get_static_stage_bgr(frame.shape[1], frame.shape[0])
         return overlay_rgba(stage_bgr, canvas, out_x, out_y, canvas_w, canvas_h)
 
     return overlay_rgba(frame, canvas, out_x, out_y, canvas_w, canvas_h)
