@@ -280,11 +280,6 @@ def _try_open_cv_writer(candidate: str, codec: str, fps: int, width: int, height
     if writer.isOpened():
         return writer
     writer.release()
-
-    writer = cv2.VideoWriter(candidate, fourcc, fps, (width, height))
-    if writer.isOpened():
-        return writer
-    writer.release()
     return None
 
 
@@ -325,6 +320,37 @@ def _try_open_ffmpeg_writer(candidate: str, fps: int, width: int, height: int):
 
     time.sleep(0.05)
     if process.poll() is not None:
+        try:
+            process.kill()
+        except Exception:
+            pass
+        return None
+
+    if process.stdin is None:
+        try:
+            process.kill()
+        except Exception:
+            pass
+        return None
+
+    # Write one probe frame so unsupported format/size combinations fail immediately.
+    probe = bytes(width * height * 3)
+    try:
+        process.stdin.write(probe)
+        process.stdin.flush()
+    except Exception:
+        try:
+            process.kill()
+        except Exception:
+            pass
+        return None
+
+    time.sleep(0.05)
+    if process.poll() is not None:
+        try:
+            process.kill()
+        except Exception:
+            pass
         return None
 
     return FfmpegPipeWriter(process, candidate, FrameSpec(width=width, height=height, fps=fps))
@@ -401,6 +427,21 @@ def create_writer(device: str, spec: FrameSpec) -> Tuple[object, FrameSpec]:
         seen_fps.add(value)
         unique_fps.append(value)
 
+    def candidate_sizes(candidate_path: str) -> list[Tuple[int, int]]:
+        match = re.fullmatch(r"/dev/video(\d+)", candidate_path)
+        if match and _is_likely_uvc_output_node(int(match.group(1))):
+            gadget_sizes = [(320, 240), (640, 480), (1280, 720)]
+            merged = gadget_sizes + unique_sizes
+            dedup = []
+            seen_local = set()
+            for item in merged:
+                if item in seen_local:
+                    continue
+                seen_local.add(item)
+                dedup.append(item)
+            return dedup
+        return unique_sizes
+
     last_error = None
     for _ in range(60):
         candidates = []
@@ -418,9 +459,10 @@ def create_writer(device: str, spec: FrameSpec) -> Tuple[object, FrameSpec]:
             unique_candidates.append(candidate)
 
         for candidate in unique_candidates:
+            sizes_for_candidate = candidate_sizes(candidate)
             for codec in codec_candidates:
                 for fps in unique_fps:
-                    for width, height in unique_sizes:
+                    for width, height in sizes_for_candidate:
                         writer = _try_open_cv_writer(candidate, codec, fps, width, height)
                         if writer is not None:
                             if preferred_is_auto or candidate != preferred or width != spec.width or height != spec.height or fps != spec.fps:
