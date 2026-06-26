@@ -303,12 +303,13 @@ def _try_open_cv_writer(candidate: str, codec: str, fps: int, width: int, height
     return None
 
 
-def _configure_v4l2_output(candidate: str, fps: int, width: int, height: int) -> bool:
+def _configure_v4l2_output(candidate: str, fps: int, width: int, height: int, codec: str) -> bool:
+    pixfmt = "MJPG" if codec.upper() == "MJPG" else "YUYV"
     cmd_set_fmt = [
         "v4l2-ctl",
         "-d",
         candidate,
-        f"--set-fmt-video=width={width},height={height},pixelformat=YUYV",
+        f"--set-fmt-video=width={width},height={height},pixelformat={pixfmt}",
     ]
     cmd_set_fps = ["v4l2-ctl", "-d", candidate, f"--set-parm={fps}"]
 
@@ -324,7 +325,7 @@ def _configure_v4l2_output(candidate: str, fps: int, width: int, height: int) ->
     return True
 
 
-def _try_open_ffmpeg_writer(candidate: str, fps: int, width: int, height: int):
+def _try_open_ffmpeg_writer(candidate: str, fps: int, width: int, height: int, codec: str):
     command = [
         "ffmpeg",
         "-hide_banner",
@@ -341,14 +342,14 @@ def _try_open_ffmpeg_writer(candidate: str, fps: int, width: int, height: int):
         "-i",
         "-",
         "-an",
-        "-vcodec",
-        "rawvideo",
-        "-pix_fmt",
-        "yuyv422",
-        "-f",
-        "v4l2",
-        candidate,
     ]
+
+    if codec.upper() == "MJPG":
+        command.extend(["-vcodec", "mjpeg", "-q:v", "5"])
+    else:
+        command.extend(["-vcodec", "rawvideo", "-pix_fmt", "yuyv422"])
+
+    command.extend(["-f", "v4l2", candidate])
     try:
         process = subprocess.Popen(
             command,
@@ -520,7 +521,7 @@ def create_writer(device: str, spec: FrameSpec) -> Tuple[object, FrameSpec]:
             for codec in codec_candidates:
                 for fps in fps_for_candidate:
                     for width, height in sizes_for_candidate:
-                        if not _configure_v4l2_output(candidate, fps, width, height):
+                        if not _configure_v4l2_output(candidate, fps, width, height, codec):
                             last_error = f"无法配置输出设备格式: {candidate} {width}x{height}@{fps}"
                             continue
 
@@ -532,10 +533,10 @@ def create_writer(device: str, spec: FrameSpec) -> Tuple[object, FrameSpec]:
                             return writer, FrameSpec(width=width, height=height, fps=fps)
                         last_error = f"无法打开输出设备: {candidate}"
 
-                        ffmpeg_writer = _try_open_ffmpeg_writer(candidate, fps, width, height)
+                        ffmpeg_writer = _try_open_ffmpeg_writer(candidate, fps, width, height, codec)
                         if ffmpeg_writer is not None:
                             if preferred_is_auto or candidate != preferred or width != spec.width or height != spec.height or fps != spec.fps:
-                                print(f"output_auto_selected={candidate} method=ffmpeg size={width}x{height} fps={fps}")
+                                print(f"output_auto_selected={candidate} method=ffmpeg codec={codec} size={width}x{height} fps={fps}")
                                 sys.stdout.flush()
                             return ffmpeg_writer, FrameSpec(width=width, height=height, fps=fps)
 
