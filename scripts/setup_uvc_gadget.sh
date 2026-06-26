@@ -59,17 +59,18 @@ link_uvc_function() {
   rm -f "$GADGET_DIR/configs/c.1/$UVC_FUNC" 2>/dev/null || true
   rm -f "$GADGET_DIR/configs/c.1/f1" 2>/dev/null || true
 
-  # Canonical configfs style: link to the config directory, kernel chooses link name.
+  # On some kernels, configfs validates target relative to configs/c.1.
+  # So we must use ../../functions/<func> rather than functions/<func>.
   (
     cd "$GADGET_DIR"
-    ln -s "functions/$UVC_FUNC" "configs/c.1/" 2>/dev/null || true
+    ln -s "../../functions/$UVC_FUNC" "configs/c.1/$UVC_FUNC" 2>/dev/null || true
   )
   [[ -L "$GADGET_DIR/configs/c.1/$UVC_FUNC" ]] && return 0
 
   # Some vendor kernels only accept explicit link names like f1.
   (
     cd "$GADGET_DIR"
-    ln -s "functions/$UVC_FUNC" "configs/c.1/f1" 2>/dev/null || true
+    ln -s "../../functions/$UVC_FUNC" "configs/c.1/f1" 2>/dev/null || true
   )
   [[ -L "$GADGET_DIR/configs/c.1/f1" ]] && return 0
 
