@@ -1422,8 +1422,8 @@ def animate_avatar_features(avatar_rgba: np.ndarray, blink_progress: float, mout
     h, w = animated.shape[:2]
     blink = float(np.clip(blink_progress, 0.0, 1.0))
     mouth_raw = float(np.clip(mouth_open, 0.0, 1.0))
-    # Amplify subtle detector output so mouth motion is visible at 640x360.
-    mouth = float(np.clip((mouth_raw - 0.02) * 2.8, 0.0, 1.0))
+    # Stronger amplification for low-resolution camera input.
+    mouth = float(np.clip((mouth_raw - 0.01) * 4.0, 0.0, 1.0))
 
     eye_box_w = max(12, int(w * 0.24))
     eye_box_h = max(10, int(h * 0.16))
@@ -1454,7 +1454,7 @@ def animate_avatar_features(avatar_rgba: np.ndarray, blink_progress: float, mout
     my1 = max(0, mouth_cy - mouth_box_h // 2)
     my2 = min(h, mouth_cy + mouth_box_h // 2)
 
-    if mouth > 0.04 and mx2 - mx1 >= 2 and my2 - my1 >= 2:
+    if mouth > 0.01 and mx2 - mx1 >= 2 and my2 - my1 >= 2:
         mouth_roi = animated[my1:my2, mx1:mx2]
         roi_h, roi_w = mouth_roi.shape[:2]
         mid = max(1, roi_h // 2)
@@ -1462,7 +1462,7 @@ def animate_avatar_features(avatar_rgba: np.ndarray, blink_progress: float, mout
         bottom = mouth_roi[mid:, :].copy()
 
         shift = max(1, int(roi_h * 0.65 * mouth))
-        modified = np.zeros_like(mouth_roi)
+        modified = mouth_roi.copy()
         modified[:mid, :] = top
 
         dst_start = min(roi_h - 1, mid + shift)
@@ -1472,11 +1472,10 @@ def animate_avatar_features(avatar_rgba: np.ndarray, blink_progress: float, mout
             modified[dst_start:, :] = bottom_scaled
 
         if dst_start > mid:
-            gap_alpha = int(np.clip(95 + 120 * mouth, 60, 220))
-            modified[mid:dst_start, :, 0] = 20
-            modified[mid:dst_start, :, 1] = 8
-            modified[mid:dst_start, :, 2] = 26
-            modified[mid:dst_start, :, 3] = gap_alpha
+            bridge_src = mouth_roi[max(0, mid - 1): min(roi_h, mid + 1), :]
+            if bridge_src.size > 0:
+                bridge = cv2.resize(bridge_src, (roi_w, dst_start - mid), interpolation=cv2.INTER_LINEAR)
+                modified[mid:dst_start, :] = bridge
 
         blend = float(np.clip(0.52 + mouth * 0.40, 0.52, 0.92))
         mixed = mouth_roi.astype(np.float32) * (1.0 - blend) + modified.astype(np.float32) * blend
@@ -1618,7 +1617,7 @@ def update_tracking(state: FaceState) -> FaceState:
 
     TRACKING_STATE.face = smooth_face(TRACKING_STATE.face, state.face)
     TRACKING_STATE.angle = smooth_value(TRACKING_STATE.angle, state.angle, 0.78)
-    TRACKING_STATE.mouth_open = smooth_value(TRACKING_STATE.mouth_open, state.mouth_open, 0.70)
+    TRACKING_STATE.mouth_open = smooth_value(TRACKING_STATE.mouth_open, state.mouth_open, 0.45)
     TRACKING_STATE.eye_open = smooth_value(TRACKING_STATE.eye_open, state.eye_open, 0.72)
 
     smoothed_face = TRACKING_STATE.face
