@@ -10,12 +10,49 @@ INSTALL_ROOT="/opt/rk3588-avatar-gateway"
 SERVICE_FILE="/etc/systemd/system/avatar-gateway.service"
 UVC_SETUP_SERVICE_FILE="/etc/systemd/system/uvc-gadget-setup.service"
 ENV_FILE="/etc/default/avatar-gateway"
+USBDEVICE_OVERRIDE_DIR="/etc/usbdevice.d"
+USBDEVICE_UVC_OVERRIDE_FILE="$USBDEVICE_OVERRIDE_DIR/uvc.sh"
 
 install -d /etc/systemd/system
 install -d "$INSTALL_ROOT"
 cp -a "$PROJECT_ROOT"/. "$INSTALL_ROOT"/
 chmod +x "$INSTALL_ROOT"/scripts/*.sh "$INSTALL_ROOT"/scripts/*.py
 install -d "$INSTALL_ROOT/assets/avatars"
+
+install -d "$USBDEVICE_OVERRIDE_DIR"
+cat > "$USBDEVICE_UVC_OVERRIDE_FILE" <<'EOF'
+#!/bin/sh
+
+uvc_prepare()
+{
+  UVC_DIR=$(pwd)
+
+  mkdir -p "$UVC_DIR/control/header/h"
+  mkdir -p "$UVC_DIR/control/class/fs" "$UVC_DIR/control/class/ss"
+  mkdir -p "$UVC_DIR/streaming/header/h"
+  mkdir -p "$UVC_DIR/streaming/class/fs" "$UVC_DIR/streaming/class/hs" "$UVC_DIR/streaming/class/ss"
+  mkdir -p "$UVC_DIR/streaming/uncompressed/u/240p"
+  mkdir -p "$UVC_DIR/streaming/mjpeg/m/240p"
+  mkdir -p "$UVC_DIR/streaming/color_matching/default"
+
+  usb_symlink "$UVC_DIR/control/header/h" "$UVC_DIR/control/class/fs/h"
+  usb_symlink "$UVC_DIR/control/header/h" "$UVC_DIR/control/class/ss/h"
+
+  usb_try_symlink "$UVC_DIR/streaming/uncompressed/u" "$UVC_DIR/streaming/header/h/u"
+  usb_try_symlink "$UVC_DIR/streaming/mjpeg/m" "$UVC_DIR/streaming/header/h/m"
+
+  usb_symlink "$UVC_DIR/streaming/header/h" "$UVC_DIR/streaming/class/fs/h"
+  usb_symlink "$UVC_DIR/streaming/header/h" "$UVC_DIR/streaming/class/hs/h"
+  usb_symlink "$UVC_DIR/streaming/header/h" "$UVC_DIR/streaming/class/ss/h"
+
+  cd "$UVC_DIR/streaming/uncompressed/u"
+  uvc_add_yuyv 320x240
+
+  cd "$UVC_DIR/streaming/mjpeg/m"
+  uvc_add_mjpeg 320x240
+}
+EOF
+chmod 0644 "$USBDEVICE_UVC_OVERRIDE_FILE"
 
 if [[ ! -f "$ENV_FILE" ]]; then
   cat > "$ENV_FILE" <<EOF
