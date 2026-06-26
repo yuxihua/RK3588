@@ -266,8 +266,10 @@ class FfmpegPipeWriter:
         text = data.decode("utf-8", errors="ignore").strip()
         if not text:
             return ""
-        lines = text.splitlines()
-        return lines[-1] if lines else ""
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if not lines:
+            return ""
+        return " | ".join(lines[-4:])
 
     def write(self, frame: np.ndarray) -> None:
         if self.process.poll() is not None or self.process.stdin is None:
@@ -299,6 +301,27 @@ def _try_open_cv_writer(candidate: str, codec: str, fps: int, width: int, height
         return writer
     writer.release()
     return None
+
+
+def _configure_v4l2_output(candidate: str, fps: int, width: int, height: int) -> bool:
+    cmd_set_fmt = [
+        "v4l2-ctl",
+        "-d",
+        candidate,
+        f"--set-fmt-video=width={width},height={height},pixelformat=YUYV",
+    ]
+    cmd_set_fps = ["v4l2-ctl", "-d", candidate, f"--set-parm={fps}"]
+
+    try:
+        result_fmt = subprocess.run(cmd_set_fmt, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    except FileNotFoundError:
+        return True
+
+    if result_fmt.returncode != 0:
+        return False
+
+    subprocess.run(cmd_set_fps, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    return True
 
 
 def _try_open_ffmpeg_writer(candidate: str, fps: int, width: int, height: int):
@@ -497,6 +520,10 @@ def create_writer(device: str, spec: FrameSpec) -> Tuple[object, FrameSpec]:
             for codec in codec_candidates:
                 for fps in fps_for_candidate:
                     for width, height in sizes_for_candidate:
+                        if not _configure_v4l2_output(candidate, fps, width, height):
+                            last_error = f"无法配置输出设备格式: {candidate} {width}x{height}@{fps}"
+                            continue
+
                         writer = _try_open_cv_writer(candidate, codec, fps, width, height)
                         if writer is not None:
                             if preferred_is_auto or candidate != preferred or width != spec.width or height != spec.height or fps != spec.fps:
