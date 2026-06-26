@@ -254,8 +254,26 @@ class FfmpegPipeWriter:
         self.device = device
         self.spec = spec
 
+    def _error_detail(self) -> str:
+        if self.process.stderr is None:
+            return ""
+        try:
+            data = self.process.stderr.read()
+        except Exception:
+            return ""
+        if not data:
+            return ""
+        text = data.decode("utf-8", errors="ignore").strip()
+        if not text:
+            return ""
+        lines = text.splitlines()
+        return lines[-1] if lines else ""
+
     def write(self, frame: np.ndarray) -> None:
         if self.process.poll() is not None or self.process.stdin is None:
+            detail = self._error_detail()
+            if detail:
+                raise RuntimeError(f"ffmpeg 输出进程已退出: {self.device}; {detail}")
             raise RuntimeError(f"ffmpeg 输出进程已退出: {self.device}")
         frame_to_write = np.ascontiguousarray(frame)
         self.process.stdin.write(frame_to_write.tobytes())
@@ -313,7 +331,7 @@ def _try_open_ffmpeg_writer(candidate: str, fps: int, width: int, height: int):
             command,
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
         )
     except FileNotFoundError:
         return None
@@ -407,7 +425,7 @@ def create_writer(device: str, spec: FrameSpec) -> Tuple[object, FrameSpec]:
         (640, 480),
         (320, 240),
     ]
-    fps_candidates = [spec.fps, 30, 25, 15]
+    fps_candidates = [spec.fps, 15, 30, 25]
 
     unique_sizes = []
     seen_sizes = set()
@@ -442,6 +460,21 @@ def create_writer(device: str, spec: FrameSpec) -> Tuple[object, FrameSpec]:
             return dedup
         return unique_sizes
 
+    def candidate_fps(candidate_path: str) -> list[int]:
+        match = re.fullmatch(r"/dev/video(\d+)", candidate_path)
+        if match and _is_likely_uvc_output_node(int(match.group(1))):
+            preferred = [15, 30, 25]
+            merged = preferred + unique_fps
+            dedup = []
+            seen_local = set()
+            for item in merged:
+                if item in seen_local:
+                    continue
+                seen_local.add(item)
+                dedup.append(item)
+            return dedup
+        return unique_fps
+
     last_error = None
     for _ in range(60):
         candidates = []
@@ -460,8 +493,9 @@ def create_writer(device: str, spec: FrameSpec) -> Tuple[object, FrameSpec]:
 
         for candidate in unique_candidates:
             sizes_for_candidate = candidate_sizes(candidate)
+            fps_for_candidate = candidate_fps(candidate)
             for codec in codec_candidates:
-                for fps in unique_fps:
+                for fps in fps_for_candidate:
                     for width, height in sizes_for_candidate:
                         writer = _try_open_cv_writer(candidate, codec, fps, width, height)
                         if writer is not None:
