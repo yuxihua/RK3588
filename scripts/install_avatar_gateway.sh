@@ -64,8 +64,8 @@ chmod 0644 "$USBDEVICE_OVERRIDE_FILE"
 
 if [[ ! -f "$ENV_FILE" ]]; then
   cat > "$ENV_FILE" <<EOF
-AVATAR_NAME=avatar
-GPIO_AVATAR_SELECT=1
+AVATAR_NAME=avatar_male
+GPIO_AVATAR_SELECT=0
 GPIO0_PIN=0
 GPIO1_PIN=1
 AVATAR_GPIO_00=avatar_00
@@ -78,7 +78,7 @@ NETWORK_HOST=0.0.0.0
 NETWORK_PORT=8080
 NETWORK_PATH=/mjpeg
 NETWORK_JPEG_QUALITY=85
-FALLBACK_STYLE=normal
+FALLBACK_STYLE=cartoon
 EOF
 fi
 
@@ -114,8 +114,8 @@ Wants=usbdevice.service
 Type=simple
 WorkingDirectory=$INSTALL_ROOT
 EnvironmentFile=-$ENV_FILE
-Environment=AVATAR_NAME=avatar
-Environment=GPIO_AVATAR_SELECT=1
+Environment=AVATAR_NAME=avatar_male
+Environment=GPIO_AVATAR_SELECT=0
 Environment=GPIO0_PIN=0
 Environment=GPIO1_PIN=1
 Environment=AVATAR_GPIO_00=avatar_00
