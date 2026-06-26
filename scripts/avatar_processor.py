@@ -320,7 +320,7 @@ def _configure_v4l2_output(candidate: str, fps: int, width: int, height: int, co
         return True
 
     if result_fmt.returncode != 0:
-        return False
+        return True
 
     subprocess.run(cmd_set_fps, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
     return True
@@ -466,7 +466,7 @@ def create_writer(device: str, spec: FrameSpec) -> Tuple[object, FrameSpec]:
     def candidate_sizes(candidate_path: str) -> list[Tuple[int, int]]:
         match = re.fullmatch(r"/dev/video(\d+)", candidate_path)
         if match and _is_likely_uvc_output_node(int(match.group(1))):
-            gadget_sizes = [(320, 240), (640, 480), (1280, 720)]
+            gadget_sizes = [(320, 240)]
             merged = gadget_sizes + unique_sizes
             dedup = []
             seen_local = set()
@@ -481,7 +481,7 @@ def create_writer(device: str, spec: FrameSpec) -> Tuple[object, FrameSpec]:
     def candidate_fps(candidate_path: str) -> list[int]:
         match = re.fullmatch(r"/dev/video(\d+)", candidate_path)
         if match and _is_likely_uvc_output_node(int(match.group(1))):
-            preferred = [15, 30, 25]
+            preferred = [15, 30]
             merged = preferred + unique_fps
             dedup = []
             seen_local = set()
@@ -492,6 +492,12 @@ def create_writer(device: str, spec: FrameSpec) -> Tuple[object, FrameSpec]:
                 dedup.append(item)
             return dedup
         return unique_fps
+
+    def candidate_codecs(candidate_path: str) -> list[str]:
+        match = re.fullmatch(r"/dev/video(\d+)", candidate_path)
+        if match and _is_likely_uvc_output_node(int(match.group(1))):
+            return ["YUYV", "MJPG"]
+        return list(codec_candidates)
 
     last_error = None
     for _ in range(60):
@@ -512,12 +518,11 @@ def create_writer(device: str, spec: FrameSpec) -> Tuple[object, FrameSpec]:
         for candidate in unique_candidates:
             sizes_for_candidate = candidate_sizes(candidate)
             fps_for_candidate = candidate_fps(candidate)
-            for codec in codec_candidates:
+            codecs_for_candidate = candidate_codecs(candidate)
+            for codec in codecs_for_candidate:
                 for fps in fps_for_candidate:
                     for width, height in sizes_for_candidate:
-                        if not _configure_v4l2_output(candidate, fps, width, height, codec):
-                            last_error = f"无法配置输出设备格式: {candidate} {width}x{height}@{fps}"
-                            continue
+                        _configure_v4l2_output(candidate, fps, width, height, codec)
 
                         writer = _try_open_cv_writer(candidate, codec, fps, width, height)
                         if writer is not None:
