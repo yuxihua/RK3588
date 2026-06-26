@@ -6,6 +6,8 @@
 
 - `assets/avatars/cyber_girl.png`
 - `assets/avatars/anchor_blue.png`
+- `assets/avatars/avatar_male.png`
+- `assets/avatars/avatar_female.png`
 
 如果你要用 GPIO0/GPIO1 进行四种虚拟形象选择，建议使用以下文件名：
 
