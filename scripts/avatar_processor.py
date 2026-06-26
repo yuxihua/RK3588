@@ -247,10 +247,35 @@ def create_capture(device: str, spec: FrameSpec) -> cv2.VideoCapture:
     return capture
 
 
-def create_writer(device: str, spec: FrameSpec) -> cv2.VideoWriter:
+def create_writer(device: str, spec: FrameSpec) -> Tuple[cv2.VideoWriter, FrameSpec]:
     preferred = (device or "").strip()
     preferred_is_auto = preferred.lower() == "auto"
     codec_candidates = ("MJPG", "YUYV")
+    size_candidates = [
+        (spec.width, spec.height),
+        (1280, 720),
+        (640, 480),
+        (320, 240),
+    ]
+    fps_candidates = [spec.fps, 30, 25, 15]
+
+    unique_sizes = []
+    seen_sizes = set()
+    for width, height in size_candidates:
+        key = (int(width), int(height))
+        if key in seen_sizes:
+            continue
+        seen_sizes.add(key)
+        unique_sizes.append(key)
+
+    unique_fps = []
+    seen_fps = set()
+    for fps in fps_candidates:
+        value = int(fps)
+        if value <= 0 or value in seen_fps:
+            continue
+        seen_fps.add(value)
+        unique_fps.append(value)
 
     last_error = None
     for _ in range(60):
@@ -278,15 +303,17 @@ def create_writer(device: str, spec: FrameSpec) -> cv2.VideoWriter:
 
         for candidate in unique_candidates:
             for codec in codec_candidates:
-                fourcc = cv2.VideoWriter_fourcc(*codec)
-                writer = cv2.VideoWriter(candidate, cv2.CAP_V4L2, fourcc, spec.fps, (spec.width, spec.height))
-                if writer.isOpened():
-                    if preferred_is_auto or candidate != preferred:
-                        print(f"output_auto_selected={candidate} codec={codec}")
-                        sys.stdout.flush()
-                    return writer
-                writer.release()
-                last_error = f"无法打开输出设备: {candidate}"
+                for fps in unique_fps:
+                    for width, height in unique_sizes:
+                        fourcc = cv2.VideoWriter_fourcc(*codec)
+                        writer = cv2.VideoWriter(candidate, cv2.CAP_V4L2, fourcc, fps, (width, height))
+                        if writer.isOpened():
+                            if preferred_is_auto or candidate != preferred or width != spec.width or height != spec.height or fps != spec.fps:
+                                print(f"output_auto_selected={candidate} codec={codec} size={width}x{height} fps={fps}")
+                                sys.stdout.flush()
+                            return writer, FrameSpec(width=width, height=height, fps=fps)
+                        writer.release()
+                        last_error = f"无法打开输出设备: {candidate}"
 
         time.sleep(1.0)
 
@@ -1217,10 +1244,12 @@ def main() -> int:
     mouth_cascade = load_cascade("haarcascade_smile.xml")
 
     capture = create_capture(args.camera, spec)
-    writer = create_writer(args.output, spec)
+    writer, output_spec = create_writer(args.output, spec)
 
     print(f"camera={args.camera}")
     print(f"output={args.output}")
+    print(f"output_size={output_spec.width}x{output_spec.height}")
+    print(f"output_fps={output_spec.fps}")
     print(f"avatar={'yes' if avatar is not None else 'no'}")
     print(f"avatar_path={avatar_path or 'none'}")
     print(f"gpio_avatar_select={'on' if gpio_selector.enabled else 'off'}")
@@ -1243,6 +1272,8 @@ def main() -> int:
             avatar_path, avatar = gpio_selector.select(now, avatar_path, avatar)
 
             output_frame = process_frame(frame, avatar, face_cascade, eye_cascade, mouth_cascade)
+            if output_frame.shape[1] != output_spec.width or output_frame.shape[0] != output_spec.height:
+                output_frame = cv2.resize(output_frame, (output_spec.width, output_spec.height), interpolation=cv2.INTER_AREA)
             writer.write(output_frame)
             time.sleep(frame_delay * 0.15)
     finally:
