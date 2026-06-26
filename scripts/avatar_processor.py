@@ -579,6 +579,13 @@ def create_writer(device: str, spec: FrameSpec) -> Tuple[object, FrameSpec]:
                     for width, height in sizes_for_candidate:
                         _configure_v4l2_output(candidate, fps, width, height, codec)
 
+                        raw_writer = _try_open_raw_writer(candidate, fps, width, height, codec)
+                        if raw_writer is not None:
+                            if preferred_is_auto or candidate != preferred or width != spec.width or height != spec.height or fps != spec.fps:
+                                print(f"output_auto_selected={candidate} method=raw codec={codec} size={width}x{height} fps={fps}")
+                                sys.stdout.flush()
+                            return raw_writer, FrameSpec(width=width, height=height, fps=fps)
+
                         writer = _try_open_cv_writer(candidate, codec, fps, width, height)
                         if writer is not None:
                             if preferred_is_auto or candidate != preferred or width != spec.width or height != spec.height or fps != spec.fps:
@@ -593,13 +600,6 @@ def create_writer(device: str, spec: FrameSpec) -> Tuple[object, FrameSpec]:
                                 print(f"output_auto_selected={candidate} method=ffmpeg codec={codec} size={width}x{height} fps={fps}")
                                 sys.stdout.flush()
                             return ffmpeg_writer, FrameSpec(width=width, height=height, fps=fps)
-
-                        raw_writer = _try_open_raw_writer(candidate, fps, width, height, codec)
-                        if raw_writer is not None:
-                            if preferred_is_auto or candidate != preferred or width != spec.width or height != spec.height or fps != spec.fps:
-                                print(f"output_auto_selected={candidate} method=raw codec={codec} size={width}x{height} fps={fps}")
-                                sys.stdout.flush()
-                            return raw_writer, FrameSpec(width=width, height=height, fps=fps)
 
         time.sleep(1.0)
 
