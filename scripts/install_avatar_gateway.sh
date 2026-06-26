@@ -23,9 +23,13 @@ install -d "$USBDEVICE_OVERRIDE_DIR"
 cat > "$USBDEVICE_UVC_OVERRIDE_FILE" <<'EOF'
 #!/bin/sh
 
+UVC_INSTANCES=${UVC_INSTANCES:-uvc.gs7}
+
 uvc_prepare()
 {
-  UVC_DIR=$(pwd)
+  UVC_DIR="$USB_FUNCTIONS_DIR/${UVC_INSTANCES%% *}"
+
+  [ -d "$UVC_DIR" ] || return 0
 
   mkdir -p "$UVC_DIR/control/header/h"
   mkdir -p "$UVC_DIR/control/class/fs" "$UVC_DIR/control/class/ss"
