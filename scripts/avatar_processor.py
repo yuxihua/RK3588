@@ -1532,7 +1532,16 @@ def update_tracking(state: FaceState) -> FaceState:
     )
 
 
-def composite_avatar(frame: np.ndarray, avatar: np.ndarray, state: FaceState, now: float) -> np.ndarray:
+def _default_idle_face(frame: np.ndarray) -> FaceState:
+    frame_h, frame_w = frame.shape[:2]
+    face_w = int(frame_w * 0.22)
+    face_h = int(frame_h * 0.34)
+    face_x = int((frame_w - face_w) * 0.5)
+    face_y = int(frame_h * 0.18)
+    return FaceState(face=(face_x, face_y, face_w, face_h), angle=0.0, mouth_open=0.0, eye_open=0.95)
+
+
+def composite_avatar(frame: np.ndarray, avatar: np.ndarray, state: FaceState, now: float, replace_background: bool = True) -> np.ndarray:
     x, y, w, h = state.face
     face_center_x = x + w / 2.0
     face_center_y = y + h * 0.40
@@ -1607,6 +1616,21 @@ def composite_avatar(frame: np.ndarray, avatar: np.ndarray, state: FaceState, no
 
     out_x = int(face_center_x - canvas_w / 2.0)
     out_y = int(face_center_y - head_h * 0.54)
+
+    if replace_background:
+        bg_phase = now * 0.55
+        stage = create_stage_background(frame.shape[1], frame.shape[0], bg_phase)
+        stage = add_vignette(stage)
+        stage = add_grid_overlay(stage, bg_phase)
+        stage = add_side_panels(stage, bg_phase)
+        stage = add_frame_accents(stage, bg_phase)
+        stage = add_scanlines(stage, bg_phase)
+        stage = add_neon_beams(stage, bg_phase)
+        stage = add_bottom_band(stage, bg_phase)
+        stage = apply_cyber_grade(stage, bg_phase)
+        stage_bgr = stage[:, :, :3].copy()
+        return overlay_rgba(stage_bgr, canvas, out_x, out_y, canvas_w, canvas_h)
+
     return overlay_rgba(frame, canvas, out_x, out_y, canvas_w, canvas_h)
 
 
@@ -1624,16 +1648,29 @@ def process_frame(
         return cartoonize(frame)
 
     state = estimate_pose(frame, face_cascade, eye_cascade, mouth_cascade)
-    if state is None:
-        if fallback_style == "normal":
-            return frame
-        return cartoonize(frame)
-
-    state = update_tracking(state)
     now = time.monotonic()
-    update_blink_state(state, now)
 
-    return composite_avatar(frame, avatar, state, now)
+    if state is not None:
+        state = update_tracking(state)
+    else:
+        if TRACKING_STATE.face is not None:
+            smoothed_face = TRACKING_STATE.face
+            state = FaceState(
+                face=(
+                    int(smoothed_face[0]),
+                    int(smoothed_face[1]),
+                    int(smoothed_face[2]),
+                    int(smoothed_face[3]),
+                ),
+                angle=TRACKING_STATE.angle,
+                mouth_open=TRACKING_STATE.mouth_open * 0.90,
+                eye_open=max(0.75, TRACKING_STATE.eye_open),
+            )
+        else:
+            state = _default_idle_face(frame)
+
+    update_blink_state(state, now)
+    return composite_avatar(frame, avatar, state, now, replace_background=True)
 
 
 def main() -> int:
