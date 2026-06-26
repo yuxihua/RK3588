@@ -1389,7 +1389,7 @@ def _squeeze_rgba_region(region: np.ndarray, vertical_scale: float) -> np.ndarra
     target_h = max(1, int(rh * clamped_scale))
     scaled = cv2.resize(region, (rw, target_h), interpolation=cv2.INTER_LINEAR)
 
-    out = np.zeros_like(region)
+    out = region.copy()
     y = max(0, (rh - target_h) // 2)
     out[y:y + target_h, :] = scaled
     return out
@@ -1420,18 +1420,6 @@ def animate_avatar_features(avatar_rgba: np.ndarray, blink_progress: float, mout
 
         eye_roi = animated[y1:y2, x1:x2]
         squeezed = _squeeze_rgba_region(eye_roi, eye_scale)
-
-        if blink > 0.08:
-            shade = np.zeros_like(squeezed)
-            shade_alpha = int(85 * blink)
-            cv2.rectangle(
-                shade,
-                (0, 0),
-                (max(0, squeezed.shape[1] - 1), max(0, squeezed.shape[0] // 2)),
-                (20, 20, 26, shade_alpha),
-                -1,
-            )
-            squeezed = overlay_rgba(squeezed, shade, 0, 0, shade.shape[1], shade.shape[0])
 
         animated[y1:y2, x1:x2] = squeezed
 
