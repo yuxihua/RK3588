@@ -763,8 +763,14 @@ def overlay_rgba(background: np.ndarray, foreground: np.ndarray, x: int, y: int,
     rgb = fg_region[:, :, :3].astype(np.float32)
 
     bg_region = background[y1:y2, x1:x2].astype(np.float32)
-    blended = rgb * alpha + bg_region * (1.0 - alpha)
-    background[y1:y2, x1:x2] = blended.astype(np.uint8)
+    bg_rgb = bg_region[:, :, :3]
+    blended = rgb * alpha + bg_rgb * (1.0 - alpha)
+    background[y1:y2, x1:x2, :3] = blended.astype(np.uint8)
+
+    if background.shape[2] == 4:
+        bg_alpha = bg_region[:, :, 3:4]
+        out_alpha = np.maximum(bg_alpha, fg_region[:, :, 3:4].astype(np.float32))
+        background[y1:y2, x1:x2, 3:4] = out_alpha.astype(np.uint8)
     return background
 
 
