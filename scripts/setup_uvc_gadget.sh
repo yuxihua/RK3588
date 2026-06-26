@@ -108,6 +108,7 @@ set_usb_device_role
 unbind_all_gadgets
 
 $MODPROBE libcomposite
+$MODPROBE usb_f_uvc 2>/dev/null || true
 mkdir -p "$GADGET_DIR"
 cd "$GADGET_DIR"
 
@@ -122,6 +123,10 @@ echo "0001" > strings/0x409/serialnumber
 echo "UVC gadget configuration" > configs/c.1/strings/0x409/configuration
 echo 120 > configs/c.1/MaxPower
 
+if [[ ! -d "functions/$UVC_FUNC" ]]; then
+  mkdir "functions/$UVC_FUNC"
+fi
+
 mkdir -p "functions/$UVC_FUNC/control/header/main"
 mkdir -p "functions/$UVC_FUNC/control/class"
 mkdir -p "functions/$UVC_FUNC/streaming/header"
@@ -135,6 +140,8 @@ echo 333333 > "functions/$UVC_FUNC/streaming/uncompressed/mjpeg/720p/dwFrameInte
 echo 1843200 > "functions/$UVC_FUNC/streaming/uncompressed/mjpeg/720p/dwMaxVideoFrameBufferSize" || true
 if ! link_uvc_function; then
   echo "无法把 functions/$UVC_FUNC 链接到 configs/c.1，UVC 配置不完整。" >&2
+  ls -la "functions" >&2 || true
+  ls -la "configs/c.1" >&2 || true
   exit 1
 fi
 
