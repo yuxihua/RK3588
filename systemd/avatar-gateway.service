@@ -6,6 +6,7 @@ Wants=usbdevice.service
 [Service]
 Type=simple
 WorkingDirectory=/opt/rk3588-avatar-gateway
+EnvironmentFile=-/etc/default/avatar-gateway
 Environment=OUTPUT_MODE=network
 Environment=OUTPUT_DEVICE=/dev/video43
 Environment=NETWORK_HOST=0.0.0.0
@@ -13,7 +14,7 @@ Environment=NETWORK_PORT=8080
 Environment=NETWORK_PATH=/mjpeg
 Environment=NETWORK_JPEG_QUALITY=85
 Environment=FALLBACK_STYLE=normal
-ExecStart=/usr/bin/python3 /opt/rk3588-avatar-gateway/scripts/avatar_processor.py --camera /dev/video41 --output-mode ${OUTPUT_MODE} --output ${OUTPUT_DEVICE} --network-host ${NETWORK_HOST} --network-port ${NETWORK_PORT} --network-path ${NETWORK_PATH} --network-jpeg-quality ${NETWORK_JPEG_QUALITY} --fallback-style ${FALLBACK_STYLE} --avatar /opt/rk3588-avatar-gateway/assets/avatar.png --width 640 --height 360 --fps 15
+ExecStart=/opt/rk3588-avatar-gateway/scripts/run_avatar_gateway.sh
 Restart=always
 RestartSec=1
 KillSignal=SIGTERM

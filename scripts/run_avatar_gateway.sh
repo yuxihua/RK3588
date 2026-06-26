@@ -4,4 +4,53 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
-exec "$PYTHON_BIN" "$ROOT_DIR/scripts/avatar_processor.py" "$@"
+CAMERA="${CAMERA:-/dev/video41}"
+OUTPUT_MODE="${OUTPUT_MODE:-network}"
+OUTPUT_DEVICE="${OUTPUT_DEVICE:-/dev/video43}"
+NETWORK_HOST="${NETWORK_HOST:-0.0.0.0}"
+NETWORK_PORT="${NETWORK_PORT:-8080}"
+NETWORK_PATH="${NETWORK_PATH:-/mjpeg}"
+NETWORK_JPEG_QUALITY="${NETWORK_JPEG_QUALITY:-85}"
+FALLBACK_STYLE="${FALLBACK_STYLE:-normal}"
+
+AVATAR_NAME="${AVATAR_NAME:-avatar}"
+GPIO_AVATAR_SELECT="${GPIO_AVATAR_SELECT:-1}"
+GPIO0_PIN="${GPIO0_PIN:-0}"
+GPIO1_PIN="${GPIO1_PIN:-1}"
+AVATAR_GPIO_00="${AVATAR_GPIO_00:-avatar_00}"
+AVATAR_GPIO_01="${AVATAR_GPIO_01:-avatar_01}"
+AVATAR_GPIO_10="${AVATAR_GPIO_10:-avatar_10}"
+AVATAR_GPIO_11="${AVATAR_GPIO_11:-avatar_11}"
+
+WIDTH="${WIDTH:-640}"
+HEIGHT="${HEIGHT:-360}"
+FPS="${FPS:-15}"
+
+ARGS=(
+	--camera "$CAMERA"
+	--output-mode "$OUTPUT_MODE"
+	--output "$OUTPUT_DEVICE"
+	--network-host "$NETWORK_HOST"
+	--network-port "$NETWORK_PORT"
+	--network-path "$NETWORK_PATH"
+	--network-jpeg-quality "$NETWORK_JPEG_QUALITY"
+	--fallback-style "$FALLBACK_STYLE"
+	--avatar "$ROOT_DIR/assets/avatar.png"
+	--avatar-dir "$ROOT_DIR/assets/avatars"
+	--avatar-name "$AVATAR_NAME"
+	--gpio0 "$GPIO0_PIN"
+	--gpio1 "$GPIO1_PIN"
+	--avatar-gpio-00 "$AVATAR_GPIO_00"
+	--avatar-gpio-01 "$AVATAR_GPIO_01"
+	--avatar-gpio-10 "$AVATAR_GPIO_10"
+	--avatar-gpio-11 "$AVATAR_GPIO_11"
+	--width "$WIDTH"
+	--height "$HEIGHT"
+	--fps "$FPS"
+)
+
+if [[ "$GPIO_AVATAR_SELECT" == "1" || "$GPIO_AVATAR_SELECT" == "true" || "$GPIO_AVATAR_SELECT" == "on" ]]; then
+	ARGS+=(--gpio-avatar-select)
+fi
+
+exec "$PYTHON_BIN" "$ROOT_DIR/scripts/avatar_processor.py" "${ARGS[@]}" "$@"
