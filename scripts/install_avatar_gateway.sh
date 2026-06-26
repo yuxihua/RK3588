@@ -24,8 +24,8 @@ cat > "$USBDEVICE_OVERRIDE_FILE" <<'EOF'
 #!/bin/sh
 
 # Ensure vendor usbdevice starts both UVC and ADB by default.
-USB_FUNCS=${USB_FUNCS:-"uvc adb"}
-UVC_INSTANCES=${UVC_INSTANCES:-uvc.gs7}
+USB_FUNCS="uvc adb"
+UVC_INSTANCES="uvc.gs7"
 
 uvc_prepare()
 {
