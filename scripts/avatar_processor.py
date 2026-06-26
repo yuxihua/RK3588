@@ -244,12 +244,12 @@ def create_writer(device: str, spec: FrameSpec) -> cv2.VideoWriter:
     fourcc = cv2.VideoWriter_fourcc(*"MJPG")
 
     last_error = None
-    for _ in range(20):
+    for _ in range(60):
         writer = cv2.VideoWriter(device, cv2.CAP_V4L2, fourcc, spec.fps, (spec.width, spec.height))
         if writer.isOpened():
             return writer
         last_error = f"无法打开输出设备: {device}"
-        time.sleep(0.5)
+        time.sleep(1.0)
 
     raise RuntimeError(last_error or f"无法打开输出设备: {device}")
 
