@@ -1380,21 +1380,99 @@ def add_lower_third(background: np.ndarray, phase: float = 0.0) -> np.ndarray:
     return background
 
 
-def draw_eyelids(canvas: np.ndarray, face_height: int, blink_progress: float) -> np.ndarray:
-    if blink_progress <= 0.0:
-        return canvas
+def _squeeze_rgba_region(region: np.ndarray, vertical_scale: float) -> np.ndarray:
+    rh, rw = region.shape[:2]
+    if rh <= 1 or rw <= 1:
+        return region
 
-    eye_y = int(face_height * 0.32)
-    eye_x_left = int(canvas.shape[1] * 0.35)
-    eye_x_right = int(canvas.shape[1] * 0.65)
-    eye_width = max(12, int(face_height * 0.12))
-    eye_height = max(4, int(face_height * (0.05 + blink_progress * 0.08)))
-    alpha = int(220 * blink_progress)
-    color = (18, 22, 30, alpha)
+    clamped_scale = float(np.clip(vertical_scale, 0.12, 1.0))
+    target_h = max(1, int(rh * clamped_scale))
+    scaled = cv2.resize(region, (rw, target_h), interpolation=cv2.INTER_LINEAR)
 
-    cv2.ellipse(canvas, (eye_x_left, eye_y), (eye_width, eye_height), 0, 0, 360, color, -1)
-    cv2.ellipse(canvas, (eye_x_right, eye_y), (eye_width, eye_height), 0, 0, 360, color, -1)
-    return canvas
+    out = np.zeros_like(region)
+    y = max(0, (rh - target_h) // 2)
+    out[y:y + target_h, :] = scaled
+    return out
+
+
+def animate_avatar_features(avatar_rgba: np.ndarray, blink_progress: float, mouth_open: float) -> np.ndarray:
+    if avatar_rgba.ndim != 3 or avatar_rgba.shape[2] != 4:
+        return avatar_rgba
+
+    animated = avatar_rgba.copy()
+    h, w = animated.shape[:2]
+    blink = float(np.clip(blink_progress, 0.0, 1.0))
+    mouth = float(np.clip(mouth_open, 0.0, 1.0))
+
+    eye_box_w = max(12, int(w * 0.24))
+    eye_box_h = max(10, int(h * 0.16))
+    eye_y_center = int(h * 0.34)
+    eye_scale = max(0.18, 1.0 - blink * 0.78)
+
+    for cx_ratio in (0.34, 0.66):
+        cx = int(w * cx_ratio)
+        x1 = max(0, cx - eye_box_w // 2)
+        x2 = min(w, cx + eye_box_w // 2)
+        y1 = max(0, eye_y_center - eye_box_h // 2)
+        y2 = min(h, eye_y_center + eye_box_h // 2)
+        if x2 - x1 < 2 or y2 - y1 < 2:
+            continue
+
+        eye_roi = animated[y1:y2, x1:x2]
+        squeezed = _squeeze_rgba_region(eye_roi, eye_scale)
+
+        if blink > 0.08:
+            shade = np.zeros_like(squeezed)
+            shade_alpha = int(85 * blink)
+            cv2.rectangle(
+                shade,
+                (0, 0),
+                (max(0, squeezed.shape[1] - 1), max(0, squeezed.shape[0] // 2)),
+                (20, 20, 26, shade_alpha),
+                -1,
+            )
+            squeezed = overlay_rgba(squeezed, shade, 0, 0, shade.shape[1], shade.shape[0])
+
+        animated[y1:y2, x1:x2] = squeezed
+
+    mouth_box_w = max(16, int(w * 0.30))
+    mouth_box_h = max(12, int(h * 0.16))
+    mouth_cx = int(w * 0.50)
+    mouth_cy = int(h * 0.73)
+    mx1 = max(0, mouth_cx - mouth_box_w // 2)
+    mx2 = min(w, mouth_cx + mouth_box_w // 2)
+    my1 = max(0, mouth_cy - mouth_box_h // 2)
+    my2 = min(h, mouth_cy + mouth_box_h // 2)
+
+    if mouth > 0.04 and mx2 - mx1 >= 2 and my2 - my1 >= 2:
+        mouth_roi = animated[my1:my2, mx1:mx2]
+        roi_h, roi_w = mouth_roi.shape[:2]
+        mid = max(1, roi_h // 2)
+        top = mouth_roi[:mid, :].copy()
+        bottom = mouth_roi[mid:, :].copy()
+
+        shift = max(1, int(roi_h * 0.30 * mouth))
+        modified = np.zeros_like(mouth_roi)
+        modified[:mid, :] = top
+
+        dst_start = min(roi_h - 1, mid + shift)
+        avail = roi_h - dst_start
+        if avail > 0 and bottom.size > 0:
+            bottom_scaled = cv2.resize(bottom, (roi_w, avail), interpolation=cv2.INTER_LINEAR)
+            modified[dst_start:, :] = bottom_scaled
+
+        if dst_start > mid:
+            gap_alpha = int(np.clip(95 + 120 * mouth, 60, 220))
+            modified[mid:dst_start, :, 0] = 20
+            modified[mid:dst_start, :, 1] = 8
+            modified[mid:dst_start, :, 2] = 26
+            modified[mid:dst_start, :, 3] = gap_alpha
+
+        blend = float(np.clip(0.30 + mouth * 0.52, 0.30, 0.82))
+        mixed = mouth_roi.astype(np.float32) * (1.0 - blend) + modified.astype(np.float32) * blend
+        animated[my1:my2, mx1:mx2] = np.clip(mixed, 0, 255).astype(np.uint8)
+
+    return animated
 
 
 def cartoonize(frame: np.ndarray) -> np.ndarray:
@@ -1586,7 +1664,9 @@ def composite_avatar(frame: np.ndarray, avatar: np.ndarray, state: FaceState, no
     canvas = apply_cyber_grade(canvas, phase)
 
     resized_avatar = cv2.resize(avatar, (head_w, head_h), interpolation=cv2.INTER_AREA)
-    rotated_avatar = rotate_rgba(resized_avatar, -state.angle * 1.35)
+    blink_level = max(TRACKING_STATE.blink_progress, 1.0 - state.eye_open)
+    animated_avatar = animate_avatar_features(resized_avatar, blink_level, state.mouth_open)
+    rotated_avatar = rotate_rgba(animated_avatar, -state.angle * 1.35)
 
     head_x = int((canvas_w - rotated_avatar.shape[1]) / 2.0)
     head_y = int(h * 0.02 + 3.0 * np.sin(phase * 2.4))
@@ -1595,7 +1675,6 @@ def composite_avatar(frame: np.ndarray, avatar: np.ndarray, state: FaceState, no
     head_x += int(sway)
 
     canvas = overlay_rgba(canvas, rotated_avatar, head_x, head_y, rotated_avatar.shape[1], rotated_avatar.shape[0])
-    canvas = draw_eyelids(canvas, head_h, max(TRACKING_STATE.blink_progress, 1.0 - state.eye_open))
 
     body_x = int((canvas_w - body_w) / 2.0)
     body_y = int(head_h * 0.64 + 3.0 * np.sin(phase * 1.6))
