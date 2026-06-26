@@ -46,6 +46,7 @@ class TrackingState:
 
 STOP_REQUESTED = False
 TRACKING_STATE = TrackingState()
+BUILD_TAG = "2026-06-26-uvc-probe-v2"
 random.seed()
 
 
@@ -1473,6 +1474,7 @@ def main() -> int:
 
     print(f"camera={args.camera}")
     print(f"output={args.output}")
+    print(f"build_tag={BUILD_TAG}")
     print(f"output_size={output_spec.width}x{output_spec.height}")
     print(f"output_fps={output_spec.fps}")
     print(f"avatar={'yes' if avatar is not None else 'no'}")
