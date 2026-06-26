@@ -11,8 +11,7 @@ SERVICE_FILE="/etc/systemd/system/avatar-gateway.service"
 UVC_SETUP_SERVICE_FILE="/etc/systemd/system/uvc-gadget-setup.service"
 ENV_FILE="/etc/default/avatar-gateway"
 USBDEVICE_OVERRIDE_DIR="/etc/usbdevice.d"
-USBDEVICE_UVC_OVERRIDE_FILE="$USBDEVICE_OVERRIDE_DIR/uvc.sh"
-USBDEVICE_FUNCS_OVERRIDE_FILE="$USBDEVICE_OVERRIDE_DIR/00-usb-funcs.sh"
+USBDEVICE_OVERRIDE_FILE="$USBDEVICE_OVERRIDE_DIR/00-avatar-usbdevice.sh"
 
 install -d /etc/systemd/system
 install -d "$INSTALL_ROOT"
@@ -21,17 +20,12 @@ chmod +x "$INSTALL_ROOT"/scripts/*.sh "$INSTALL_ROOT"/scripts/*.py
 install -d "$INSTALL_ROOT/assets/avatars"
 
 install -d "$USBDEVICE_OVERRIDE_DIR"
-cat > "$USBDEVICE_FUNCS_OVERRIDE_FILE" <<'EOF'
+cat > "$USBDEVICE_OVERRIDE_FILE" <<'EOF'
 #!/bin/sh
 
 # Ensure vendor usbdevice starts both UVC and ADB by default.
 USB_FUNCS=${USB_FUNCS:-"uvc adb"}
 UVC_INSTANCES=${UVC_INSTANCES:-uvc.gs7}
-EOF
-chmod 0644 "$USBDEVICE_FUNCS_OVERRIDE_FILE"
-
-cat > "$USBDEVICE_UVC_OVERRIDE_FILE" <<'EOF'
-#!/bin/sh
 
 uvc_prepare()
 {
@@ -66,7 +60,7 @@ uvc_prepare()
   uvc_add_mjpeg 320x240
 }
 EOF
-chmod 0644 "$USBDEVICE_UVC_OVERRIDE_FILE"
+chmod 0644 "$USBDEVICE_OVERRIDE_FILE"
 
 if [[ ! -f "$ENV_FILE" ]]; then
   cat > "$ENV_FILE" <<EOF
