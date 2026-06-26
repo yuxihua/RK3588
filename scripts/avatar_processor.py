@@ -417,7 +417,6 @@ def _is_likely_uvc_output_node(video_index: int) -> bool:
 
 def _list_auto_output_candidates() -> list[str]:
     output_nodes = []
-    fallback_nodes = []
 
     for path in Path("/dev").glob("video*"):
         name = path.name
@@ -429,15 +428,9 @@ def _list_auto_output_candidates() -> list[str]:
         candidate = str(path)
         if _is_likely_uvc_output_node(index):
             output_nodes.append((index, candidate))
-        else:
-            fallback_nodes.append((index, candidate))
 
     output_nodes.sort(key=lambda item: item[0])
-    fallback_nodes.sort(key=lambda item: item[0])
-
-    if output_nodes:
-        return [path for _, path in output_nodes]
-    return [path for _, path in fallback_nodes]
+    return [path for _, path in output_nodes]
 
 
 def create_writer(device: str, spec: FrameSpec) -> Tuple[object, FrameSpec]:

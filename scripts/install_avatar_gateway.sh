@@ -34,8 +34,8 @@ fi
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=RK3588 USB Avatar Gateway
-After=network.target local-fs.target uvc-gadget-setup.service
-Requires=uvc-gadget-setup.service
+After=network.target local-fs.target usbdevice.service
+Wants=usbdevice.service
 
 [Service]
 Type=simple
@@ -75,8 +75,8 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl disable --now usbdevice.service 2>/dev/null || true
-systemctl enable --now uvc-gadget-setup.service
+systemctl enable usbdevice.service 2>/dev/null || true
+systemctl enable uvc-gadget-setup.service 2>/dev/null || true
 systemctl enable --now avatar-gateway
 
 echo "已安装并启动 avatar-gateway 服务。"
