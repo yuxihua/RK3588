@@ -1,0 +1,12 @@
+[Unit]
+Description=Setup RK3588 UVC Gadget (ConfigFS)
+After=local-fs.target
+Before=avatar-gateway.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/rk3588-avatar-gateway/scripts/setup_uvc_gadget.sh
+
+[Install]
+WantedBy=multi-user.target
