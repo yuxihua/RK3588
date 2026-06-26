@@ -26,6 +26,24 @@ WIDTH="${WIDTH:-640}"
 HEIGHT="${HEIGHT:-360}"
 FPS="${FPS:-15}"
 
+resolve_avatar_fallback() {
+	local candidates=(
+		"$ROOT_DIR/assets/avatars/avatar_male.png"
+		"$ROOT_DIR/assets/avatars/avatar_female.png"
+		"$ROOT_DIR/assets/avatar.png"
+	)
+	local candidate
+	for candidate in "${candidates[@]}"; do
+		if [[ -f "$candidate" ]]; then
+			echo "$candidate"
+			return 0
+		fi
+	done
+	echo "$ROOT_DIR/assets/avatar.png"
+}
+
+AVATAR_FALLBACK_PATH="$(resolve_avatar_fallback)"
+
 ARGS=(
 	--camera "$CAMERA"
 	--output-mode "$OUTPUT_MODE"
@@ -35,7 +53,7 @@ ARGS=(
 	--network-path "$NETWORK_PATH"
 	--network-jpeg-quality "$NETWORK_JPEG_QUALITY"
 	--fallback-style "$FALLBACK_STYLE"
-	--avatar "$ROOT_DIR/assets/avatar.png"
+	--avatar "$AVATAR_FALLBACK_PATH"
 	--avatar-dir "$ROOT_DIR/assets/avatars"
 	--avatar-name "$AVATAR_NAME"
 	--gpio0 "$GPIO0_PIN"

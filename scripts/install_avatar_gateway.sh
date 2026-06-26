@@ -104,6 +104,17 @@ if ! grep -q '^FALLBACK_STYLE=' "$ENV_FILE"; then
   echo 'FALLBACK_STYLE=normal' >> "$ENV_FILE"
 fi
 
+# Migrate legacy defaults from older installs so virtual avatar works out-of-box.
+if grep -q '^AVATAR_NAME=avatar$' "$ENV_FILE"; then
+  sed -i 's/^AVATAR_NAME=avatar$/AVATAR_NAME=avatar_male/' "$ENV_FILE"
+fi
+if grep -q '^GPIO_AVATAR_SELECT=1$' "$ENV_FILE"; then
+  sed -i 's/^GPIO_AVATAR_SELECT=1$/GPIO_AVATAR_SELECT=0/' "$ENV_FILE"
+fi
+if grep -q '^FALLBACK_STYLE=cartoon$' "$ENV_FILE"; then
+  sed -i 's/^FALLBACK_STYLE=cartoon$/FALLBACK_STYLE=normal/' "$ENV_FILE"
+fi
+
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=RK3588 USB Avatar Gateway
