@@ -81,7 +81,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", default="auto", help="Output UVC gadget device, or auto")
     parser.add_argument("--avatar", default="", help="PNG avatar with alpha channel")
     parser.add_argument("--avatar-dir", default="", help="Directory that stores selectable avatar PNG files")
-    parser.add_argument("--avatar-name", default="", help="Avatar name to load from avatar-dir (without .png)")
+    parser.add_argument(
+        "--avatar-name",
+        nargs="?",
+        const="",
+        default="",
+        help="Avatar name to load from avatar-dir (without .png)",
+    )
     parser.add_argument("--gpio-avatar-select", action="store_true", help="Enable GPIO based avatar select")
     parser.add_argument("--gpio0", type=int, default=0, help="GPIO pin index for avatar select bit0")
     parser.add_argument("--gpio1", type=int, default=1, help="GPIO pin index for avatar select bit1")
@@ -245,7 +251,6 @@ def create_writer(device: str, spec: FrameSpec) -> cv2.VideoWriter:
     preferred = (device or "").strip()
     preferred_is_auto = preferred.lower() == "auto"
     codec_candidates = ("MJPG", "YUYV")
-    exclude_candidates = set()
 
     last_error = None
     for _ in range(60):
@@ -266,7 +271,7 @@ def create_writer(device: str, spec: FrameSpec) -> cv2.VideoWriter:
         unique_candidates = []
         seen = set()
         for candidate in candidates:
-            if candidate in seen or candidate in exclude_candidates:
+            if candidate in seen:
                 continue
             seen.add(candidate)
             unique_candidates.append(candidate)
@@ -282,7 +287,6 @@ def create_writer(device: str, spec: FrameSpec) -> cv2.VideoWriter:
                     return writer
                 writer.release()
                 last_error = f"无法打开输出设备: {candidate}"
-                exclude_candidates.add(candidate)
 
         time.sleep(1.0)
 
