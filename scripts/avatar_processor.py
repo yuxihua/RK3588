@@ -8,6 +8,7 @@ import os
 import random
 import re
 import signal
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -247,7 +248,89 @@ def create_capture(device: str, spec: FrameSpec) -> cv2.VideoCapture:
     return capture
 
 
-def create_writer(device: str, spec: FrameSpec) -> Tuple[cv2.VideoWriter, FrameSpec]:
+class FfmpegPipeWriter:
+    def __init__(self, process: subprocess.Popen[bytes], device: str, spec: FrameSpec):
+        self.process = process
+        self.device = device
+        self.spec = spec
+
+    def write(self, frame: np.ndarray) -> None:
+        if self.process.poll() is not None or self.process.stdin is None:
+            raise RuntimeError(f"ffmpeg 输出进程已退出: {self.device}")
+        frame_to_write = np.ascontiguousarray(frame)
+        self.process.stdin.write(frame_to_write.tobytes())
+
+    def release(self) -> None:
+        if self.process.stdin is not None:
+            try:
+                self.process.stdin.close()
+            except Exception:
+                pass
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=1.0)
+            except Exception:
+                self.process.kill()
+
+
+def _try_open_cv_writer(candidate: str, codec: str, fps: int, width: int, height: int):
+    fourcc = cv2.VideoWriter_fourcc(*codec)
+    writer = cv2.VideoWriter(candidate, cv2.CAP_V4L2, fourcc, fps, (width, height))
+    if writer.isOpened():
+        return writer
+    writer.release()
+
+    writer = cv2.VideoWriter(candidate, fourcc, fps, (width, height))
+    if writer.isOpened():
+        return writer
+    writer.release()
+    return None
+
+
+def _try_open_ffmpeg_writer(candidate: str, fps: int, width: int, height: int):
+    command = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "bgr24",
+        "-s",
+        f"{width}x{height}",
+        "-r",
+        str(fps),
+        "-i",
+        "-",
+        "-an",
+        "-vcodec",
+        "rawvideo",
+        "-pix_fmt",
+        "yuyv422",
+        "-f",
+        "v4l2",
+        candidate,
+    ]
+    try:
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        return None
+
+    time.sleep(0.05)
+    if process.poll() is not None:
+        return None
+
+    return FfmpegPipeWriter(process, candidate, FrameSpec(width=width, height=height, fps=fps))
+
+
+def create_writer(device: str, spec: FrameSpec) -> Tuple[object, FrameSpec]:
     preferred = (device or "").strip()
     preferred_is_auto = preferred.lower() == "auto"
     codec_candidates = ("MJPG", "YUYV")
@@ -305,15 +388,20 @@ def create_writer(device: str, spec: FrameSpec) -> Tuple[cv2.VideoWriter, FrameS
             for codec in codec_candidates:
                 for fps in unique_fps:
                     for width, height in unique_sizes:
-                        fourcc = cv2.VideoWriter_fourcc(*codec)
-                        writer = cv2.VideoWriter(candidate, cv2.CAP_V4L2, fourcc, fps, (width, height))
-                        if writer.isOpened():
+                        writer = _try_open_cv_writer(candidate, codec, fps, width, height)
+                        if writer is not None:
                             if preferred_is_auto or candidate != preferred or width != spec.width or height != spec.height or fps != spec.fps:
-                                print(f"output_auto_selected={candidate} codec={codec} size={width}x{height} fps={fps}")
+                                print(f"output_auto_selected={candidate} method=cv2 codec={codec} size={width}x{height} fps={fps}")
                                 sys.stdout.flush()
                             return writer, FrameSpec(width=width, height=height, fps=fps)
-                        writer.release()
                         last_error = f"无法打开输出设备: {candidate}"
+
+                        ffmpeg_writer = _try_open_ffmpeg_writer(candidate, fps, width, height)
+                        if ffmpeg_writer is not None:
+                            if preferred_is_auto or candidate != preferred or width != spec.width or height != spec.height or fps != spec.fps:
+                                print(f"output_auto_selected={candidate} method=ffmpeg size={width}x{height} fps={fps}")
+                                sys.stdout.flush()
+                            return ffmpeg_writer, FrameSpec(width=width, height=height, fps=fps)
 
         time.sleep(1.0)
 
@@ -1274,7 +1362,14 @@ def main() -> int:
             output_frame = process_frame(frame, avatar, face_cascade, eye_cascade, mouth_cascade)
             if output_frame.shape[1] != output_spec.width or output_frame.shape[0] != output_spec.height:
                 output_frame = cv2.resize(output_frame, (output_spec.width, output_spec.height), interpolation=cv2.INTER_AREA)
-            writer.write(output_frame)
+            try:
+                writer.write(output_frame)
+            except Exception as exc:
+                print(f"writer_error={exc}")
+                sys.stdout.flush()
+                writer.release()
+                time.sleep(0.2)
+                writer, output_spec = create_writer(args.output, spec)
             time.sleep(frame_delay * 0.15)
     finally:
         capture.release()
