@@ -10,7 +10,7 @@ MODPROBE="${MODPROBE:-modprobe}"
 CONFIGFS=/sys/kernel/config
 GADGET_DIR="$CONFIGFS/usb_gadget/rk3588_uvc"
 UDC_NAME=""
-UVC_FUNC="uvc.usb0"
+UVC_FUNC="uvc.0"
 
 set_usb_device_role() {
   local role_path
@@ -59,18 +59,17 @@ link_uvc_function() {
   rm -f "$GADGET_DIR/configs/c.1/$UVC_FUNC" 2>/dev/null || true
   rm -f "$GADGET_DIR/configs/c.1/f1" 2>/dev/null || true
 
-  # On some kernels, configfs validates target relative to configs/c.1.
-  # So we must use ../../functions/<func> rather than functions/<func>.
+  # Prefer the same link style verified by acm.usb0 on this board.
   (
     cd "$GADGET_DIR"
-    ln -s "../../functions/$UVC_FUNC" "configs/c.1/$UVC_FUNC" 2>/dev/null || true
+    ln -s "functions/$UVC_FUNC" "configs/c.1/$UVC_FUNC" 2>/dev/null || true
   )
   [[ -L "$GADGET_DIR/configs/c.1/$UVC_FUNC" ]] && return 0
 
   # Some vendor kernels only accept explicit link names like f1.
   (
     cd "$GADGET_DIR"
-    ln -s "../../functions/$UVC_FUNC" "configs/c.1/f1" 2>/dev/null || true
+    ln -s "functions/$UVC_FUNC" "configs/c.1/f1" 2>/dev/null || true
   )
   [[ -L "$GADGET_DIR/configs/c.1/f1" ]] && return 0
 
