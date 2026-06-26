@@ -1540,10 +1540,10 @@ def update_tracking(state: FaceState) -> FaceState:
 
 def _default_idle_face(frame: np.ndarray) -> FaceState:
     frame_h, frame_w = frame.shape[:2]
-    face_w = int(frame_w * 0.22)
-    face_h = int(frame_h * 0.34)
+    face_w = int(frame_w * 0.30)
+    face_h = int(frame_h * 0.46)
     face_x = int((frame_w - face_w) * 0.5)
-    face_y = int(frame_h * 0.18)
+    face_y = int(frame_h * 0.12)
     return FaceState(face=(face_x, face_y, face_w, face_h), angle=0.0, mouth_open=0.0, eye_open=0.95)
 
 
@@ -1554,9 +1554,9 @@ def composite_avatar(frame: np.ndarray, avatar: np.ndarray, state: FaceState, no
     phase = now
     sway = 4.0 * np.sin(phase * 1.1)
 
-    head_w = int(w * 1.55)
-    head_h = int(h * (1.65 + state.mouth_open * 0.10))
-    body_h = int(h * 2.20)
+    head_w = int(w * 2.10)
+    head_h = int(h * (2.25 + state.mouth_open * 0.10))
+    body_h = int(h * 2.70)
     body_w = int(head_w * 1.10)
     canvas_h = body_h + int(h * 0.20)
     canvas_w = max(head_w, body_w)
