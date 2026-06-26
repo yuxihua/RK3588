@@ -8,12 +8,16 @@ import os
 import random
 import re
 import signal
+import socketserver
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
+from http import server as http_server
 from pathlib import Path
 from typing import Dict, Optional, Tuple
+from urllib.parse import urlparse
 
 import cv2
 import numpy as np
@@ -79,8 +83,13 @@ def get_haarcascade_dir() -> Path:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="USB camera avatar processor")
+    parser.add_argument("--output-mode", choices=["usb", "network"], default="usb", help="Output mode")
     parser.add_argument("--camera", default="/dev/video0", help="Input USB camera device")
     parser.add_argument("--output", default="auto", help="Output UVC gadget device, or auto")
+    parser.add_argument("--network-host", default="0.0.0.0", help="Network output bind host")
+    parser.add_argument("--network-port", type=int, default=8080, help="Network output port")
+    parser.add_argument("--network-path", default="/mjpeg", help="Network output path")
+    parser.add_argument("--network-jpeg-quality", type=int, default=85, help="Network output JPEG quality")
     parser.add_argument("--avatar", default="", help="PNG avatar with alpha channel")
     parser.add_argument("--avatar-dir", default="", help="Directory that stores selectable avatar PNG files")
     parser.add_argument(
@@ -335,6 +344,121 @@ class RawDeviceWriter:
             self.handle.close()
         except Exception:
             pass
+
+
+class _ThreadedHTTPServer(socketserver.ThreadingMixIn, http_server.HTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+class NetworkMjpegWriter:
+    def __init__(self, host: str, port: int, path: str, jpeg_quality: int):
+        self.host = host
+        self.port = int(port)
+        self.path = path if path.startswith("/") else f"/{path}"
+        self.jpeg_quality = max(30, min(100, int(jpeg_quality)))
+
+        self._lock = threading.Condition()
+        self._jpeg_frame: Optional[bytes] = None
+        self._generation = 0
+        self._stopped = False
+
+        writer = self
+
+        class MjpegHandler(http_server.BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                parsed = urlparse(self.path)
+                if parsed.path not in (writer.path, "/"):
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+
+                self.send_response(200)
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
+                self.send_header("Connection", "close")
+                self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+                self.end_headers()
+
+                last_generation = -1
+                while True:
+                    with writer._lock:
+                        while not writer._stopped and writer._generation == last_generation:
+                            writer._lock.wait(timeout=2.0)
+
+                        if writer._stopped:
+                            return
+
+                        payload = writer._jpeg_frame
+                        last_generation = writer._generation
+
+                    if payload is None:
+                        continue
+
+                    try:
+                        self.wfile.write(b"--frame\r\n")
+                        self.wfile.write(b"Content-Type: image/jpeg\r\n")
+                        self.wfile.write(f"Content-Length: {len(payload)}\r\n\r\n".encode("ascii"))
+                        self.wfile.write(payload)
+                        self.wfile.write(b"\r\n")
+                    except (BrokenPipeError, ConnectionResetError):
+                        return
+
+            def log_message(self, format: str, *args):  # noqa: A003
+                return
+
+        self._server = _ThreadedHTTPServer((self.host, self.port), MjpegHandler)
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+
+    def write(self, frame: np.ndarray) -> None:
+        ok, encoded = cv2.imencode(
+            ".jpg",
+            np.ascontiguousarray(frame),
+            [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality],
+        )
+        if not ok:
+            raise RuntimeError("网络输出 JPEG 编码失败")
+
+        with self._lock:
+            self._jpeg_frame = encoded.tobytes()
+            self._generation += 1
+            self._lock.notify_all()
+
+    def release(self) -> None:
+        with self._lock:
+            self._stopped = True
+            self._lock.notify_all()
+
+        try:
+            self._server.shutdown()
+        except Exception:
+            pass
+        try:
+            self._server.server_close()
+        except Exception:
+            pass
+
+
+def create_network_writer(args, spec: FrameSpec) -> Tuple[object, FrameSpec, str]:
+    writer = NetworkMjpegWriter(
+        host=args.network_host,
+        port=args.network_port,
+        path=args.network_path,
+        jpeg_quality=args.network_jpeg_quality,
+    )
+    display_host = args.network_host if args.network_host not in {"0.0.0.0", "::"} else "<board-ip>"
+    stream_url = f"http://{display_host}:{args.network_port}{writer.path}"
+    return writer, FrameSpec(width=spec.width, height=spec.height, fps=spec.fps), stream_url
+
+
+def create_output_writer(args, spec: FrameSpec) -> Tuple[object, FrameSpec, str]:
+    if args.output_mode == "network":
+        return create_network_writer(args, spec)
+
+    writer, output_spec = create_writer(args.output, spec)
+    return writer, output_spec, args.output
 
 
 def _try_open_cv_writer(candidate: str, codec: str, fps: int, width: int, height: int):
@@ -1530,10 +1654,11 @@ def main() -> int:
     mouth_cascade = load_cascade("haarcascade_smile.xml")
 
     capture = create_capture(args.camera, spec)
-    writer, output_spec = create_writer(args.output, spec)
+    writer, output_spec, output_desc = create_output_writer(args, spec)
 
     print(f"camera={args.camera}")
-    print(f"output={args.output}")
+    print(f"output_mode={args.output_mode}")
+    print(f"output={output_desc}")
     print(f"build_tag={BUILD_TAG}")
     print(f"output_size={output_spec.width}x{output_spec.height}")
     print(f"output_fps={output_spec.fps}")
@@ -1568,7 +1693,7 @@ def main() -> int:
                 sys.stdout.flush()
                 writer.release()
                 time.sleep(0.2)
-                writer, output_spec = create_writer(args.output, spec)
+                writer, output_spec, output_desc = create_output_writer(args, spec)
             time.sleep(frame_delay * 0.15)
     finally:
         capture.release()
