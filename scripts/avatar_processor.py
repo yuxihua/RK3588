@@ -289,6 +289,14 @@ def load_cascade(filename: str) -> cv2.CascadeClassifier:
     return cascade
 
 
+def load_cascade_optional(filename: str) -> Optional[cv2.CascadeClassifier]:
+    cascade_dir = get_haarcascade_dir()
+    cascade = cv2.CascadeClassifier(str(cascade_dir / filename))
+    if cascade.empty():
+        return None
+    return cascade
+
+
 def create_capture(device: str, spec: FrameSpec) -> cv2.VideoCapture:
     capture = cv2.VideoCapture(device, cv2.CAP_V4L2)
     if not capture.isOpened():
@@ -1526,13 +1534,35 @@ def cartoonize(frame: np.ndarray) -> np.ndarray:
     return cv2.bitwise_and(color, edges)
 
 
-def detect_face(frame: np.ndarray, cascade: cv2.CascadeClassifier) -> Optional[Tuple[int, int, int, int]]:
+def detect_face(
+    frame: np.ndarray,
+    cascade: cv2.CascadeClassifier,
+    profile_cascade: Optional[cv2.CascadeClassifier] = None,
+) -> Optional[Tuple[int, int, int, int]]:
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(80, 80))
-    if len(faces) == 0:
+    candidates = []
+
+    frontal_faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(72, 72))
+    for face in frontal_faces:
+        candidates.append(tuple(int(value) for value in face))
+
+    if profile_cascade is not None:
+        profile_left = profile_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(72, 72))
+        for face in profile_left:
+            candidates.append(tuple(int(value) for value in face))
+
+        gray_flipped = cv2.flip(gray, 1)
+        profile_right = profile_cascade.detectMultiScale(gray_flipped, scaleFactor=1.1, minNeighbors=4, minSize=(72, 72))
+        frame_w = gray.shape[1]
+        for face in profile_right:
+            x, y, w, h = (int(value) for value in face)
+            mirrored_x = frame_w - (x + w)
+            candidates.append((mirrored_x, y, w, h))
+
+    if len(candidates) == 0:
         return None
-    faces = sorted(faces, key=lambda item: item[2] * item[3], reverse=True)
-    return tuple(int(value) for value in faces[0])
+    candidates = sorted(candidates, key=lambda item: item[2] * item[3], reverse=True)
+    return tuple(int(value) for value in candidates[0])
 
 
 def choose_eye_pair(eyes: np.ndarray) -> Optional[Tuple[Tuple[int, int], Tuple[int, int]]]:
@@ -1558,8 +1588,9 @@ def estimate_pose(
     face_cascade: cv2.CascadeClassifier,
     eye_cascade: cv2.CascadeClassifier,
     mouth_cascade: cv2.CascadeClassifier,
+    profile_cascade: Optional[cv2.CascadeClassifier] = None,
 ) -> Optional[FaceState]:
-    face = detect_face(frame, face_cascade)
+    face = detect_face(frame, face_cascade, profile_cascade)
     if face is None:
         return None
 
@@ -1706,6 +1737,7 @@ def process_frame(
     face_cascade: cv2.CascadeClassifier,
     eye_cascade: cv2.CascadeClassifier,
     mouth_cascade: cv2.CascadeClassifier,
+    profile_cascade: Optional[cv2.CascadeClassifier],
     fallback_style: str,
     background_mode: str,
 ) -> np.ndarray:
@@ -1714,7 +1746,7 @@ def process_frame(
             return frame
         return cartoonize(frame)
 
-    state = estimate_pose(frame, face_cascade, eye_cascade, mouth_cascade)
+    state = estimate_pose(frame, face_cascade, eye_cascade, mouth_cascade, profile_cascade)
     now = time.monotonic()
 
     if state is not None:
@@ -1765,6 +1797,7 @@ def main() -> int:
         ensure_gpio_input(gpio_selector.gpio0)
         ensure_gpio_input(gpio_selector.gpio1)
     face_cascade = load_cascade("haarcascade_frontalface_default.xml")
+    profile_cascade = load_cascade_optional("haarcascade_profileface.xml")
     eye_cascade = load_cascade("haarcascade_eye_tree_eyeglasses.xml")
     mouth_cascade = load_cascade("haarcascade_smile.xml")
 
@@ -1806,6 +1839,7 @@ def main() -> int:
                 face_cascade,
                 eye_cascade,
                 mouth_cascade,
+                profile_cascade,
                 args.fallback_style,
                 args.background_mode,
             )
