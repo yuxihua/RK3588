@@ -1898,7 +1898,7 @@ def animate_avatar_features(
     if mouth > 0.005 and mx2 - mx1 >= 2 and my2 - my1 >= 2:
         mouth_roi = animated[my1:my2, mx1:mx2]
         roi_h, roi_w = mouth_roi.shape[:2]
-        lip_line = max(1, int(roi_h * 0.52))
+        lip_line = max(1, int(roi_h * 0.58))
         upper = mouth_roi[:lip_line, :].copy()
         lower = mouth_roi[lip_line:, :].copy()
 
@@ -1917,9 +1917,10 @@ def animate_avatar_features(
         if copy_h > 0:
             modified[dst_lower_start : dst_lower_start + copy_h, :] = lower[:copy_h, :]
 
-        gap_top = max(0, lip_line - up_shift // 2)
+        # Keep cavity strictly below the lip seam to avoid "mustache" shadow above lip.
+        gap_top = max(0, lip_line + max(1, int(roi_h * 0.03)))
         gap_bottom = min(roi_h, dst_lower_start + max(1, int(roi_h * 0.03 * mouth)))
-        if gap_bottom > gap_top:
+        if gap_bottom > gap_top and mouth > 0.16:
             cavity = np.zeros((roi_h, roi_w), dtype=np.uint8)
             cav_cx = roi_w // 2
             cav_cy = (gap_top + gap_bottom) // 2
@@ -1927,7 +1928,7 @@ def animate_avatar_features(
             cav_ry = max(2, int((gap_bottom - gap_top) * 0.55))
             cv2.ellipse(cavity, (cav_cx, cav_cy), (cav_rx, cav_ry), 0, 0, 360, 255, -1)
             cavity = cv2.GaussianBlur(cavity, (0, 0), max(1.0, roi_h * 0.10))
-            cav_alpha = (cavity.astype(np.float32) / 255.0)[:, :, None] * float(0.20 + 0.55 * mouth)
+            cav_alpha = (cavity.astype(np.float32) / 255.0)[:, :, None] * float(0.08 + 0.28 * mouth)
             modified[:, :, :3] = np.clip(modified[:, :, :3].astype(np.float32) * (1.0 - cav_alpha), 0, 255).astype(np.uint8)
 
         # Blend with a soft ellipse mask to avoid rectangular artifacts.
@@ -2502,7 +2503,7 @@ def composite_avatar_face_swap(
         afx, afy, afw, afh = scaled_face_box
         mouth_anchor = (
             (afx + afw * 0.50) / max(1.0, float(patch_w)),
-            (afy + afh * 0.61) / max(1.0, float(patch_h)),
+            (afy + afh * 0.68) / max(1.0, float(patch_h)),
         )
     else:
         patch_w = int(w * 1.03 * scale_mul)
