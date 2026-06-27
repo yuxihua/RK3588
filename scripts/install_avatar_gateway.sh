@@ -79,6 +79,7 @@ NETWORK_PORT=8080
 NETWORK_PATH=/mjpeg
 NETWORK_JPEG_QUALITY=85
 FALLBACK_STYLE=cartoon
+BACKGROUND_MODE=camera
 EOF
 fi
 
@@ -102,6 +103,9 @@ if ! grep -q '^NETWORK_JPEG_QUALITY=' "$ENV_FILE"; then
 fi
 if ! grep -q '^FALLBACK_STYLE=' "$ENV_FILE"; then
   echo 'FALLBACK_STYLE=normal' >> "$ENV_FILE"
+fi
+if ! grep -q '^BACKGROUND_MODE=' "$ENV_FILE"; then
+  echo 'BACKGROUND_MODE=camera' >> "$ENV_FILE"
 fi
 
 # Migrate legacy defaults from older installs so virtual avatar works out-of-box.
@@ -140,6 +144,7 @@ Environment=NETWORK_PORT=8080
 Environment=NETWORK_PATH=/mjpeg
 Environment=NETWORK_JPEG_QUALITY=85
 Environment=FALLBACK_STYLE=normal
+Environment=BACKGROUND_MODE=camera
 ExecStart=$INSTALL_ROOT/scripts/run_avatar_gateway.sh
 Restart=always
 RestartSec=1

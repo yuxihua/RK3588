@@ -131,6 +131,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fps", type=int, default=30, help="Frame rate")
     parser.add_argument("--mirror", action="store_true", help="Mirror the camera image")
     parser.add_argument(
+        "--background-mode",
+        choices=["virtual", "camera"],
+        default="virtual",
+        help="Background mode: virtual stage or original camera background",
+    )
+    parser.add_argument(
         "--fallback-style",
         choices=["cartoon", "normal"],
         default="cartoon",
@@ -161,6 +167,10 @@ def load_avatar(path: str) -> Optional[np.ndarray]:
 
 
 def resolve_avatar_path(avatar_path: str, avatar_dir: str, avatar_name: str) -> str:
+    def _normalize_avatar_filename(name: str) -> str:
+        text = (name or "").strip().lower()
+        return re.sub(r"\s*\.png$", ".png", text)
+
     selected_name = avatar_name.strip()
     selected_dir = avatar_dir.strip()
 
@@ -183,6 +193,14 @@ def resolve_avatar_path(avatar_path: str, avatar_dir: str, avatar_name: str) -> 
             for filename in candidate_names:
                 candidate = directory / filename
                 if candidate.is_file():
+                    return str(candidate)
+
+        normalized_targets = {_normalize_avatar_filename(name) for name in candidate_names}
+        for directory in candidate_dirs:
+            if not directory.is_dir():
+                continue
+            for candidate in directory.glob("*.png"):
+                if _normalize_avatar_filename(candidate.name) in normalized_targets:
                     return str(candidate)
 
     return avatar_path
@@ -1721,6 +1739,7 @@ def process_frame(
     eye_cascade: cv2.CascadeClassifier,
     mouth_cascade: cv2.CascadeClassifier,
     fallback_style: str,
+    background_mode: str,
 ) -> np.ndarray:
     if avatar is None:
         if fallback_style == "normal":
@@ -1750,7 +1769,7 @@ def process_frame(
             state = _default_idle_face(frame)
 
     update_blink_state(state, now)
-    return composite_avatar(frame, avatar, state, now, replace_background=True)
+    return composite_avatar(frame, avatar, state, now, replace_background=(background_mode != "camera"))
 
 
 def main() -> int:
@@ -1793,6 +1812,7 @@ def main() -> int:
     print(f"avatar={'yes' if avatar is not None else 'no'}")
     print(f"avatar_path={avatar_path or 'none'}")
     print(f"fallback_style={args.fallback_style}")
+    print(f"background_mode={args.background_mode}")
     print(f"gpio_avatar_select={'on' if gpio_selector.enabled else 'off'}")
     print("processing_started=true")
     sys.stdout.flush()
@@ -1819,6 +1839,7 @@ def main() -> int:
                 eye_cascade,
                 mouth_cascade,
                 args.fallback_style,
+                args.background_mode,
             )
             if output_frame.shape[1] != output_spec.width or output_frame.shape[0] != output_spec.height:
                 output_frame = cv2.resize(output_frame, (output_spec.width, output_spec.height), interpolation=cv2.INTER_AREA)
