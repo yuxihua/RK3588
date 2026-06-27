@@ -720,6 +720,17 @@ class NetworkMjpegWriter:
             const d = await r.json();
             document.getElementById('tip').textContent = '已应用: ' + JSON.stringify(d.applied || d);
         }}
+        let applyTimer = null;
+        function scheduleApply() {{
+            if (applyTimer) clearTimeout(applyTimer);
+            applyTimer = setTimeout(apply, 140);
+        }}
+        for (const id of ids) {{
+            const el = document.getElementById(id);
+            if (!el) continue;
+            el.addEventListener('change', scheduleApply);
+            if (el.tagName === 'INPUT' && el.type === 'range') el.addEventListener('input', scheduleApply);
+        }}
         document.getElementById('apply').addEventListener('click', apply);
         load();
     </script>
@@ -2581,6 +2592,61 @@ def composite_avatar(
     return overlay_rgba(frame, canvas, out_x, out_y, canvas_w, canvas_h)
 
 
+def _center_squeeze(roi: np.ndarray, amount: float) -> np.ndarray:
+    squeeze = float(np.clip(amount, 0.0, 1.0))
+    if squeeze <= 0.001:
+        return roi
+    h, w = roi.shape[:2]
+    factor = 1.0 - 0.18 * squeeze
+    new_w = max(8, int(w * factor))
+    left = (w - new_w) // 2
+    core = roi[:, left : left + new_w]
+    return cv2.resize(core, (w, h), interpolation=cv2.INTER_LINEAR)
+
+
+def _local_magnify(roi: np.ndarray, cx: int, cy: int, radius: int, scale: float, amount: float) -> np.ndarray:
+    h, w = roi.shape[:2]
+    radius = int(max(6, radius))
+    if radius <= 0 or amount <= 0.001:
+        return roi
+
+    x1 = max(0, cx - radius)
+    y1 = max(0, cy - radius)
+    x2 = min(w, cx + radius)
+    y2 = min(h, cy + radius)
+    if x2 - x1 < 6 or y2 - y1 < 6:
+        return roi
+
+    patch = roi[y1:y2, x1:x2]
+    ph, pw = patch.shape[:2]
+
+    gx, gy = np.meshgrid(np.arange(pw, dtype=np.float32), np.arange(ph, dtype=np.float32))
+    abs_x = gx + x1
+    abs_y = gy + y1
+    dx = abs_x - float(cx)
+    dy = abs_y - float(cy)
+    dist = np.sqrt(dx * dx + dy * dy)
+    r = float(radius)
+    inside = dist < r
+    if not np.any(inside):
+        return roi
+
+    falloff = np.clip(1.0 - (dist / r), 0.0, 1.0)
+    local_scale = 1.0 + (float(scale) - 1.0) * falloff
+    src_x = float(cx) + dx / np.maximum(local_scale, 1e-3)
+    src_y = float(cy) + dy / np.maximum(local_scale, 1e-3)
+
+    map_x = (src_x - x1).astype(np.float32)
+    map_y = (src_y - y1).astype(np.float32)
+    warped = cv2.remap(patch, map_x, map_y, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT101)
+
+    alpha = (falloff * float(np.clip(amount, 0.0, 1.0)))[:, :, None].astype(np.float32)
+    blended = patch.astype(np.float32) * (1.0 - alpha) + warped.astype(np.float32) * alpha
+    out = roi.copy()
+    out[y1:y2, x1:x2] = np.clip(blended, 0, 255).astype(np.uint8)
+    return out
+
+
 def beautify_with_face(
     frame: np.ndarray,
     face: Tuple[int, int, int, int],
@@ -2614,19 +2680,31 @@ def beautify_with_face(
         return frame
 
     roi = frame[y1:y2, x1:x2].copy()
+    # Geometry-first tweaks make sliders visibly effective even before color smoothing.
+    roi = _center_squeeze(roi, face_slim + 0.45 * body_slim)
+
+    roi_h, roi_w = roi.shape[:2]
+    left_eye_cx = int(roi_w * (0.38 - 0.07 * eye_spacing))
+    right_eye_cx = int(roi_w * (0.62 + 0.07 * eye_spacing))
+    eye_cy = int(roi_h * (0.37 - 0.05 * eyebrow_height))
+    eye_radius = max(10, int(min(roi_w, roi_h) * 0.10))
+    eye_scale = 1.0 + 0.45 * float(np.clip(eye_enlarge, 0.0, 1.0))
+    roi = _local_magnify(roi, left_eye_cx, eye_cy, eye_radius, eye_scale, eye_enlarge)
+    roi = _local_magnify(roi, right_eye_cx, eye_cy, eye_radius, eye_scale, eye_enlarge)
+
     smooth_amount = float(np.clip(skin_smoothness, 0.0, 1.0))
     bright_amount = float(np.clip(skin_brightness, 0.0, 1.0))
     sharpen_amount = float(np.clip(skin_sharpen, 0.0, 1.0))
 
-    smooth_d = 5 + int(6 * smooth_amount)
+    smooth_d = 5 + int(8 * smooth_amount)
     smoothed = cv2.bilateralFilter(
         roi,
         d=smooth_d,
-        sigmaColor=32 + 48 * smooth_amount,
-        sigmaSpace=32 + 48 * smooth_amount,
+        sigmaColor=36 + 72 * smooth_amount,
+        sigmaSpace=36 + 72 * smooth_amount,
     )
-    softened = cv2.addWeighted(roi, 1.0 - 0.55 * smooth_amount, smoothed, 0.55 * smooth_amount, 0)
-    brightened = cv2.convertScaleAbs(softened, alpha=1.0 + 0.16 * bright_amount, beta=12.0 * bright_amount)
+    softened = cv2.addWeighted(roi, 1.0 - 0.68 * smooth_amount, smoothed, 0.68 * smooth_amount, 0)
+    brightened = cv2.convertScaleAbs(softened, alpha=1.0 + 0.24 * bright_amount, beta=16.0 * bright_amount)
 
     if sharpen_amount > 0.0:
         blur = cv2.GaussianBlur(brightened, (0, 0), 1.0 + 0.8 * sharpen_amount)
@@ -2634,7 +2712,6 @@ def beautify_with_face(
     else:
         enhanced = brightened
 
-    roi_h, roi_w = roi.shape[:2]
     mask = np.zeros((roi_h, roi_w), dtype=np.uint8)
     local_cx = int((x + w * 0.5) - x1 + eye_spacing * w * 0.10 + np.tan(np.deg2rad(eyebrow_angle)) * h * 0.02)
     local_cy = int((y + h * (0.48 - 0.06 * float(np.clip(eyebrow_height, -0.5, 0.5)))) - y1)
@@ -2655,7 +2732,8 @@ def beautify_with_face(
         mouth_mask = cv2.GaussianBlur(mouth_mask, (0, 0), max(1.5, h * 0.06))
         mask = np.maximum(mask, (mouth_mask.astype(np.float32) * (0.18 + 0.82 * mouth_size)).astype(np.uint8))
 
-    alpha = (mask.astype(np.float32) / 255.0)[:, :, None] * float(np.clip(strength, 0.0, 1.0))
+    alpha_gain = 0.20 + 0.80 * float(np.clip(strength, 0.0, 1.0))
+    alpha = (mask.astype(np.float32) / 255.0)[:, :, None] * alpha_gain
     blended = roi.astype(np.float32) * (1.0 - alpha) + enhanced.astype(np.float32) * alpha
 
     ycrcb = cv2.cvtColor(np.clip(blended, 0, 255).astype(np.uint8), cv2.COLOR_BGR2YCrCb)
@@ -2682,8 +2760,21 @@ def beautify_with_face(
 
     if lip_color > 0.0:
         ycrcb = cv2.cvtColor(out_roi, cv2.COLOR_BGR2YCrCb)
-        lower_start = int(roi_h * 0.55)
-        ycrcb[lower_start:, :, 1] = np.clip(ycrcb[lower_start:, :, 1].astype(np.int16) + int(14 * lip_color), 0, 255).astype(np.uint8)
+        lip_mask = np.zeros((roi_h, roi_w), dtype=np.uint8)
+        cv2.ellipse(
+            lip_mask,
+            (local_cx, int(local_cy + h * 0.34)),
+            (max(8, int(w * 0.16)), max(6, int(h * 0.06))),
+            0,
+            0,
+            360,
+            255,
+            -1,
+        )
+        lip_mask = cv2.GaussianBlur(lip_mask, (0, 0), max(1.0, h * 0.04))
+        cr = ycrcb[:, :, 1].astype(np.float32)
+        cr = np.clip(cr + (lip_mask.astype(np.float32) / 255.0) * (10.0 + 22.0 * lip_color), 0, 255)
+        ycrcb[:, :, 1] = cr.astype(np.uint8)
         out_roi = cv2.cvtColor(ycrcb, cv2.COLOR_YCrCb2BGR)
 
     result = frame.copy()
