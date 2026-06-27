@@ -136,13 +136,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--eye-animation",
         choices=["off", "subtle", "normal"],
-        default="off",
+        default="subtle",
         help="Eye animation strength for avatar",
     )
     parser.add_argument(
         "--mouth-animation",
         choices=["off", "subtle", "normal"],
-        default="off",
+        default="subtle",
         help="Mouth animation strength for avatar",
     )
     parser.add_argument(

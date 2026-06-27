@@ -95,6 +95,8 @@ GPIO 选择头像（GPIO0/GPIO1 两位共四种）：
 - 输出背景模式：默认 `camera`（使用摄像头真实背景）
 - 头像缩放参数：`AVATAR_SCALE=1.0`（可调）
 - GPIO 选头像：默认关闭（`GPIO_AVATAR_SELECT=0`）
+- 眼睛动画：默认 `subtle`
+- 口型动画：默认 `subtle`
 - 分辨率：`1280x720`
 - 帧率：`15`
 - 网络 JPEG 质量：`70`
