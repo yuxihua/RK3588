@@ -131,6 +131,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--height", type=int, default=720, help="Frame height")
     parser.add_argument("--fps", type=int, default=30, help="Frame rate")
     parser.add_argument("--mirror", action="store_true", help="Mirror the camera image")
+    parser.add_argument("--avatar-scale", type=float, default=1.0, help="Scale multiplier for avatar size")
     parser.add_argument(
         "--background-mode",
         choices=["virtual", "camera"],
@@ -1774,6 +1775,7 @@ def composite_avatar(
     now: float,
     replace_background: bool = True,
     avatar_face_box: Optional[Tuple[int, int, int, int]] = None,
+    avatar_scale: float = 1.0,
 ) -> np.ndarray:
     x, y, w, h = state.face
     face_center_x = x + w / 2.0
@@ -1784,15 +1786,18 @@ def composite_avatar(
     if source_face_box is not None:
         source_avatar, source_face_box = crop_avatar_near_face(source_avatar, source_face_box)
 
+    scale_mul = float(np.clip(avatar_scale, 0.6, 3.0))
+
     if source_face_box is not None:
         _, _, sfw, _ = source_face_box
-        target_face_w = max(32, int(w * 1.35))
+        # Keep virtual head larger than real head to reduce edge leaks during movement.
+        target_face_w = max(40, int(w * 1.85 * scale_mul))
         scale = target_face_w / max(1.0, float(sfw))
-        head_w = max(48, int(source_avatar.shape[1] * scale))
-        head_h = max(48, int(source_avatar.shape[0] * scale))
+        head_w = max(64, int(source_avatar.shape[1] * scale))
+        head_h = max(64, int(source_avatar.shape[0] * scale))
     else:
-        head_w = int(w * 1.65)
-        head_h = int(h * (1.95 + state.mouth_open * 0.08))
+        head_w = int(w * 2.10 * scale_mul)
+        head_h = int(h * (2.45 * scale_mul + state.mouth_open * 0.10))
 
     resized_avatar = cv2.resize(source_avatar, (head_w, head_h), interpolation=cv2.INTER_AREA)
     blink_level = max(TRACKING_STATE.blink_progress, 1.0 - state.eye_open)
@@ -1833,6 +1838,7 @@ def process_frame(
     profile_cascade: Optional[cv2.CascadeClassifier],
     fallback_style: str,
     background_mode: str,
+    avatar_scale: float,
 ) -> np.ndarray:
     if avatar is None:
         if fallback_style == "normal":
@@ -1870,6 +1876,7 @@ def process_frame(
         now,
         replace_background=(background_mode != "camera"),
         avatar_face_box=avatar_face_box,
+        avatar_scale=avatar_scale,
     )
 
 
@@ -1913,6 +1920,7 @@ def main() -> int:
     print(f"output_fps={output_spec.fps}")
     print(f"avatar={'yes' if avatar is not None else 'no'}")
     print(f"avatar_path={avatar_path or 'none'}")
+    print(f"avatar_scale={args.avatar_scale}")
     print(f"fallback_style={args.fallback_style}")
     print(f"background_mode={args.background_mode}")
     print(f"gpio_avatar_select={'on' if gpio_selector.enabled else 'off'}")
@@ -1943,6 +1951,7 @@ def main() -> int:
                 profile_cascade,
                 args.fallback_style,
                 args.background_mode,
+                args.avatar_scale,
             )
             if output_frame.shape[1] != output_spec.width or output_frame.shape[0] != output_spec.height:
                 output_frame = cv2.resize(output_frame, (output_spec.width, output_spec.height), interpolation=cv2.INTER_AREA)

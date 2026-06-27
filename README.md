@@ -71,9 +71,11 @@ bash scripts/avatarctl.sh status
 ```bash
 bash scripts/avatarctl.sh list-avatars
 bash scripts/avatarctl.sh select-avatar cyber_girl
+bash scripts/avatarctl.sh set-scale 1.3
 ```
 
 `select-avatar` 传入的是文件名（不带 `.png`），脚本会写入 `/etc/default/avatar-gateway` 并自动重启服务。
+`set-scale` 用于设置虚拟形象缩放系数（`AVATAR_SCALE`），脚本会写入 `/etc/default/avatar-gateway` 并自动重启服务。
 
 GPIO 选择头像（GPIO0/GPIO1 两位共四种）：
 
@@ -90,7 +92,9 @@ GPIO 选择头像（GPIO0/GPIO1 两位共四种）：
 - 输出虚拟摄像头：`/dev/video11`
 - 默认头像（兜底）：`/opt/rk3588-avatar-gateway/assets/avatar.png`
 - 可选头像目录：`/opt/rk3588-avatar-gateway/assets/avatars`
-- GPIO 选头像：默认开启（`GPIO0_PIN=0`，`GPIO1_PIN=1`）
+- 输出背景模式：默认 `camera`（使用摄像头真实背景）
+- 头像缩放参数：`AVATAR_SCALE=1.0`（可调）
+- GPIO 选头像：默认关闭（`GPIO_AVATAR_SELECT=0`）
 - 分辨率：`1280x720`
 - 帧率：`30`
 

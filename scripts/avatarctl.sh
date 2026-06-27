@@ -8,6 +8,31 @@ INSTALL_ROOT="/opt/rk3588-avatar-gateway"
 ENV_FILE="/etc/default/avatar-gateway"
 AVATAR_DIR="$INSTALL_ROOT/assets/avatars"
 
+ensure_env_file() {
+  if [[ ! -f "$ENV_FILE" ]]; then
+    sudo touch "$ENV_FILE"
+  fi
+}
+
+set_env_value() {
+  local key="$1"
+  local value="$2"
+  local tmp_file
+
+  ensure_env_file
+  tmp_file="$(mktemp)"
+  sudo cat "$ENV_FILE" > "$tmp_file"
+
+  if grep -q "^${key}=" "$tmp_file"; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$tmp_file"
+  else
+    echo "${key}=${value}" >> "$tmp_file"
+  fi
+
+  sudo tee "$ENV_FILE" < "$tmp_file" > /dev/null
+  rm -f "$tmp_file"
+}
+
 list_avatars() {
   if [[ ! -d "$AVATAR_DIR" ]]; then
     echo "头像目录不存在: $AVATAR_DIR" >&2
@@ -28,9 +53,25 @@ select_avatar() {
     return 1
   fi
 
-  echo "AVATAR_NAME=$NAME" | sudo tee "$ENV_FILE" > /dev/null
+  set_env_value "AVATAR_NAME" "$NAME"
   sudo systemctl restart avatar-gateway
   echo "已切换头像为: $NAME"
+}
+
+set_scale() {
+  if [[ -z "$NAME" ]]; then
+    echo "用法: $0 set-scale <value>" >&2
+    return 1
+  fi
+
+  if ! [[ "$NAME" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    echo "缩放值必须是正数，例如 1.2" >&2
+    return 1
+  fi
+
+  set_env_value "AVATAR_SCALE" "$NAME"
+  sudo systemctl restart avatar-gateway
+  echo "已设置 AVATAR_SCALE=$NAME"
 }
 
 case "$ACTION" in
@@ -43,8 +84,11 @@ case "$ACTION" in
   select-avatar)
     select_avatar
     ;;
+  set-scale)
+    set_scale
+    ;;
   *)
-    echo "用法: $0 {start|stop|restart|status|list-avatars|select-avatar <name>}" >&2
+    echo "用法: $0 {start|stop|restart|status|list-avatars|select-avatar <name>|set-scale <value>}" >&2
     exit 1
     ;;
 esac
