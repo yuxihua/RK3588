@@ -155,6 +155,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Vertical mouth ROI offset ratio relative to avatar height",
     )
     parser.add_argument(
+        "--mouth-x-offset",
+        type=float,
+        default=0.0,
+        help="Horizontal mouth ROI offset ratio relative to avatar width",
+    )
+    parser.add_argument(
         "--background-mode",
         choices=["virtual", "camera"],
         default="virtual",
@@ -1485,6 +1491,8 @@ def animate_avatar_features(
     eye_animation: str = "off",
     mouth_animation: str = "off",
     mouth_y_offset: float = 0.0,
+    mouth_x_offset: float = 0.0,
+    mouth_anchor: Optional[Tuple[float, float]] = None,
 ) -> np.ndarray:
     if avatar_rgba.ndim != 3 or avatar_rgba.shape[2] != 4:
         return avatar_rgba
@@ -1532,9 +1540,15 @@ def animate_avatar_features(
 
     mouth_box_w = max(22, int(w * 0.30))
     mouth_box_h = max(14, int(h * 0.18))
-    mouth_cx = int(w * 0.50)
-    # Place the mouth ROI in the lower face area so opening/closing is visible.
-    mouth_cy = int(h * np.clip(0.55 + float(mouth_y_offset), 0.34, 0.72))
+    if mouth_anchor is None:
+        mouth_anchor_x = 0.50
+        mouth_anchor_y = 0.55
+    else:
+        mouth_anchor_x = float(mouth_anchor[0])
+        mouth_anchor_y = float(mouth_anchor[1])
+    mouth_cx = int(w * np.clip(mouth_anchor_x + float(mouth_x_offset), 0.20, 0.80))
+    # Place the mouth ROI in the lower face area and allow fine adjustment.
+    mouth_cy = int(h * np.clip(mouth_anchor_y + float(mouth_y_offset), 0.34, 0.82))
     mx1 = max(0, mouth_cx - mouth_box_w // 2)
     mx2 = min(w, mouth_cx + mouth_box_w // 2)
     my1 = max(0, mouth_cy - mouth_box_h // 2)
@@ -2091,6 +2105,7 @@ def composite_avatar_face_swap(
     eye_animation: str = "off",
     mouth_animation: str = "off",
     mouth_y_offset: float = 0.0,
+    mouth_x_offset: float = 0.0,
     replace_background: bool = False,
 ) -> np.ndarray:
     x, y, w, h = state.face
@@ -2105,6 +2120,7 @@ def composite_avatar_face_swap(
     scale_mul = float(np.clip(avatar_scale, 0.6, 3.0))
 
     scaled_face_box: Optional[Tuple[int, int, int, int]] = None
+    mouth_anchor: Optional[Tuple[float, float]] = None
     if source_face_box is not None:
         sfx, sfy, sfw, sfh = source_face_box
         target_face_w = max(40, int(w * 1.18 * scale_mul))
@@ -2119,6 +2135,11 @@ def composite_avatar_face_swap(
             int(sfw * scale_x),
             int(sfh * scale_y),
         )
+        afx, afy, afw, afh = scaled_face_box
+        mouth_anchor = (
+            (afx + afw * 0.50) / max(1.0, float(patch_w)),
+            (afy + afh * 0.72) / max(1.0, float(patch_h)),
+        )
     else:
         patch_w = int(w * 1.18 * scale_mul)
         patch_h = int(h * (1.18 * scale_mul))
@@ -2132,6 +2153,8 @@ def composite_avatar_face_swap(
         eye_animation,
         mouth_animation,
         mouth_y_offset,
+        mouth_x_offset,
+        mouth_anchor,
     )
     if scaled_face_box is not None:
         animated_avatar = apply_face_only_alpha_mask(animated_avatar, scaled_face_box)
@@ -2169,6 +2192,7 @@ def composite_avatar(
     eye_animation: str = "off",
     mouth_animation: str = "off",
     mouth_y_offset: float = 0.0,
+    mouth_x_offset: float = 0.0,
 ) -> np.ndarray:
     x, y, w, h = state.face
     face_center_x = x + w / 2.0
@@ -2201,6 +2225,7 @@ def composite_avatar(
         eye_animation,
         mouth_animation,
         mouth_y_offset,
+        mouth_x_offset,
     )
     # Keep alignment stable: avoid adding rotation offset when fitting face-to-face.
     rotated_avatar = animated_avatar
@@ -2242,6 +2267,7 @@ def process_frame(
     eye_animation: str,
     mouth_animation: str,
     mouth_y_offset: float,
+    mouth_x_offset: float,
     max_faces: int,
     detect_every: int,
 ) -> np.ndarray:
@@ -2292,6 +2318,7 @@ def process_frame(
                 eye_animation=eye_animation,
                 mouth_animation=local_mouth_animation,
                 mouth_y_offset=mouth_y_offset,
+                mouth_x_offset=mouth_x_offset,
             )
 
         return output_frame
@@ -2327,6 +2354,7 @@ def process_frame(
         eye_animation=eye_animation,
         mouth_animation=mouth_animation,
         mouth_y_offset=mouth_y_offset,
+        mouth_x_offset=mouth_x_offset,
     )
 
 
@@ -2374,6 +2402,7 @@ def main() -> int:
     print(f"eye_animation={args.eye_animation}")
     print(f"mouth_animation={args.mouth_animation}")
     print(f"mouth_y_offset={args.mouth_y_offset}")
+    print(f"mouth_x_offset={args.mouth_x_offset}")
     print(f"max_faces={max(1, int(args.max_faces))}")
     print(f"detect_every={max(1, int(args.detect_every))}")
     print(f"fallback_style={args.fallback_style}")
@@ -2410,6 +2439,7 @@ def main() -> int:
                 args.eye_animation,
                 args.mouth_animation,
                 args.mouth_y_offset,
+                args.mouth_x_offset,
                 max(1, int(args.max_faces)),
                 max(1, int(args.detect_every)),
             )
