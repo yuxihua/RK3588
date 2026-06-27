@@ -145,7 +145,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--mouth-animation",
         choices=["off", "subtle", "normal"],
-        default="subtle",
+        default="normal",
         help="Mouth animation strength for avatar",
     )
     parser.add_argument(
@@ -1495,9 +1495,9 @@ def animate_avatar_features(
     if mouth_animation == "off":
         mouth = 0.0
     elif mouth_animation == "subtle":
-        mouth = float(np.clip((mouth_raw - 0.02) * 1.25, 0.0, 0.28))
+        mouth = float(np.clip((mouth_raw - 0.015) * 2.2, 0.0, 0.55))
     else:
-        mouth = float(np.clip((mouth_raw - 0.005) * 5.0, 0.0, 1.0))
+        mouth = float(np.clip((mouth_raw - 0.005) * 7.5, 0.0, 1.0))
 
     eye_box_w = max(12, int(w * 0.24))
     eye_box_h = max(10, int(h * 0.16))
@@ -1523,11 +1523,11 @@ def animate_avatar_features(
 
         animated[y1:y2, x1:x2] = squeezed
 
-    mouth_box_w = max(22, int(w * 0.26))
-    mouth_box_h = max(14, int(h * 0.14))
+    mouth_box_w = max(22, int(w * 0.30))
+    mouth_box_h = max(14, int(h * 0.18))
     mouth_cx = int(w * 0.50)
-    # Portrait avatars often include torso; place mouth ROI in upper face area.
-    mouth_cy = int(h * 0.46)
+    # Place the mouth ROI in the lower face area so opening/closing is visible.
+    mouth_cy = int(h * 0.55)
     mx1 = max(0, mouth_cx - mouth_box_w // 2)
     mx2 = min(w, mouth_cx + mouth_box_w // 2)
     my1 = max(0, mouth_cy - mouth_box_h // 2)
@@ -1536,11 +1536,11 @@ def animate_avatar_features(
     if mouth > 0.005 and mx2 - mx1 >= 2 and my2 - my1 >= 2:
         mouth_roi = animated[my1:my2, mx1:mx2]
         roi_h, roi_w = mouth_roi.shape[:2]
-        lip_line = max(1, int(roi_h * 0.58))
+        lip_line = max(1, int(roi_h * 0.52))
         upper = mouth_roi[:lip_line, :].copy()
         lower = mouth_roi[lip_line:, :].copy()
 
-        shift = max(1, int(roi_h * 0.34 * mouth))
+        shift = max(1, int(roi_h * 0.56 * mouth))
         modified = mouth_roi.copy()
         modified[:lip_line, :] = upper
 
@@ -1556,15 +1556,25 @@ def animate_avatar_features(
                 modified[lip_line:dst_start, :] = seam_fill
 
         blend_mask = np.zeros((roi_h, roi_w, 1), dtype=np.float32)
-        blend_mask[max(0, lip_line - 1):, :, 0] = float(np.clip(0.55 + mouth * 0.30, 0.55, 0.85))
+        blend_mask[max(0, lip_line - 1):, :, 0] = float(np.clip(0.60 + mouth * 0.35, 0.60, 0.95))
         mixed = mouth_roi.astype(np.float32) * (1.0 - blend_mask) + modified.astype(np.float32) * blend_mask
         mixed_u8 = np.clip(mixed, 0, 255).astype(np.uint8)
 
         # Recover local sharpness only around the mouth band to avoid smearing the whole face.
-        mouth_bgr = mixed_u8[max(0, lip_line - 2):, :, :3]
+        mouth_bgr = mixed_u8[max(0, lip_line - 3):, :, :3]
         blur = cv2.GaussianBlur(mouth_bgr, (0, 0), 1.0)
         sharp = cv2.addWeighted(mouth_bgr, 1.85, blur, -0.85, 0)
-        mixed_u8[max(0, lip_line - 2):, :, :3] = np.clip(sharp, 0, 255).astype(np.uint8)
+        mixed_u8[max(0, lip_line - 3):, :, :3] = np.clip(sharp, 0, 255).astype(np.uint8)
+
+        if mouth > 0.12:
+            mouth_gap_y1 = min(roi_h - 1, lip_line + max(1, int(roi_h * 0.04)))
+            mouth_gap_y2 = min(roi_h, mouth_gap_y1 + max(1, int(roi_h * 0.10 * mouth)))
+            if mouth_gap_y2 > mouth_gap_y1:
+                mixed_u8[mouth_gap_y1:mouth_gap_y2, :, :3] = np.clip(
+                    mixed_u8[mouth_gap_y1:mouth_gap_y2, :, :3].astype(np.float32) * 0.45,
+                    0,
+                    255,
+                ).astype(np.uint8)
 
         animated[my1:my2, mx1:mx2] = mixed_u8
 

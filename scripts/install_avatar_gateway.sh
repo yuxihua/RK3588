@@ -82,7 +82,7 @@ FALLBACK_STYLE=cartoon
 BACKGROUND_MODE=camera
 AVATAR_SCALE=1.0
 EYE_ANIMATION=off
-MOUTH_ANIMATION=off
+MOUTH_ANIMATION=normal
 MAX_FACES=1
 DETECT_EVERY=2
 WIDTH=960
@@ -122,7 +122,7 @@ if ! grep -q '^EYE_ANIMATION=' "$ENV_FILE"; then
   echo 'EYE_ANIMATION=subtle' >> "$ENV_FILE"
 fi
 if ! grep -q '^MOUTH_ANIMATION=' "$ENV_FILE"; then
-  echo 'MOUTH_ANIMATION=subtle' >> "$ENV_FILE"
+  echo 'MOUTH_ANIMATION=normal' >> "$ENV_FILE"
 fi
 if ! grep -q '^MAX_FACES=' "$ENV_FILE"; then
   echo 'MAX_FACES=1' >> "$ENV_FILE"
@@ -154,7 +154,10 @@ if grep -q '^EYE_ANIMATION=off$' "$ENV_FILE"; then
   sed -i 's/^EYE_ANIMATION=off$/EYE_ANIMATION=subtle/' "$ENV_FILE"
 fi
 if grep -q '^MOUTH_ANIMATION=off$' "$ENV_FILE"; then
-  sed -i 's/^MOUTH_ANIMATION=off$/MOUTH_ANIMATION=subtle/' "$ENV_FILE"
+  sed -i 's/^MOUTH_ANIMATION=off$/MOUTH_ANIMATION=normal/' "$ENV_FILE"
+fi
+if grep -q '^MOUTH_ANIMATION=subtle$' "$ENV_FILE"; then
+  sed -i 's/^MOUTH_ANIMATION=subtle$/MOUTH_ANIMATION=normal/' "$ENV_FILE"
 fi
 if grep -q '^WIDTH=640$' "$ENV_FILE"; then
   sed -i 's/^WIDTH=640$/WIDTH=960/' "$ENV_FILE"
@@ -203,7 +206,7 @@ Environment=FALLBACK_STYLE=normal
 Environment=BACKGROUND_MODE=camera
 Environment=AVATAR_SCALE=1.0
 Environment=EYE_ANIMATION=subtle
-Environment=MOUTH_ANIMATION=subtle
+Environment=MOUTH_ANIMATION=normal
 Environment=MAX_FACES=1
 Environment=DETECT_EVERY=2
 Environment=WIDTH=960
