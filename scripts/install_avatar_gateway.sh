@@ -84,6 +84,7 @@ AVATAR_SCALE=1.0
 EYE_ANIMATION=off
 MOUTH_ANIMATION=off
 MAX_FACES=1
+DETECT_EVERY=2
 WIDTH=960
 HEIGHT=540
 FPS=15
@@ -125,6 +126,9 @@ if ! grep -q '^MOUTH_ANIMATION=' "$ENV_FILE"; then
 fi
 if ! grep -q '^MAX_FACES=' "$ENV_FILE"; then
   echo 'MAX_FACES=1' >> "$ENV_FILE"
+fi
+if ! grep -q '^DETECT_EVERY=' "$ENV_FILE"; then
+  echo 'DETECT_EVERY=2' >> "$ENV_FILE"
 fi
 if ! grep -q '^WIDTH=' "$ENV_FILE"; then
   echo 'WIDTH=960' >> "$ENV_FILE"
@@ -201,6 +205,7 @@ Environment=AVATAR_SCALE=1.0
 Environment=EYE_ANIMATION=subtle
 Environment=MOUTH_ANIMATION=subtle
 Environment=MAX_FACES=1
+Environment=DETECT_EVERY=2
 Environment=WIDTH=960
 Environment=HEIGHT=540
 Environment=FPS=15

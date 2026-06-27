@@ -97,6 +97,7 @@ GPIO 选择头像（GPIO0/GPIO1 两位共四种）：
 - GPIO 选头像：默认关闭（`GPIO_AVATAR_SELECT=0`）
 - 眼睛动画：默认 `subtle`
 - 口型动画：默认 `subtle`
+- 重检测间隔：`DETECT_EVERY=2`（每2帧做一次重检测，降低CPU占用）
 - 分辨率：`960x540`
 - 帧率：`15`
 - 网络 JPEG 质量：`70`

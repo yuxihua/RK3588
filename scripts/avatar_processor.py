@@ -53,6 +53,7 @@ TRACKING_STATE = TrackingState()
 BUILD_TAG = "2026-06-26-uvc-probe-v2"
 STATIC_STAGE_CACHE: Dict[Tuple[int, int], np.ndarray] = {}
 AVATAR_FACE_BOX_CACHE: Dict[int, Optional[Tuple[int, int, int, int]]] = {}
+FRAME_COUNTER = 0
 random.seed()
 
 
@@ -130,6 +131,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--width", type=int, default=1280, help="Frame width")
     parser.add_argument("--height", type=int, default=720, help="Frame height")
     parser.add_argument("--fps", type=int, default=30, help="Frame rate")
+    parser.add_argument("--detect-every", type=int, default=2, help="Run heavy face detection every N frames")
     parser.add_argument("--mirror", action="store_true", help="Mirror the camera image")
     parser.add_argument("--max-faces", type=int, default=1, help="Maximum faces to render with avatar")
     parser.add_argument("--avatar-scale", type=float, default=1.0, help="Scale multiplier for avatar size")
@@ -2181,16 +2183,23 @@ def process_frame(
     eye_animation: str,
     mouth_animation: str,
     max_faces: int,
+    detect_every: int,
 ) -> np.ndarray:
+    global FRAME_COUNTER
+    FRAME_COUNTER += 1
+
     if avatar is None:
         if fallback_style == "normal":
             return frame
         return cartoonize(frame)
 
     faces_multi: list[Tuple[int, int, int, int]] = []
-    if max_faces > 1:
+    detect_stride = max(1, int(detect_every))
+    must_detect = TRACKING_STATE.face is None or (FRAME_COUNTER % detect_stride == 0)
+
+    if max_faces > 1 and must_detect:
         faces_multi = detect_faces_multi(frame, face_cascade, profile_cascade, eye_cascade, max_faces=max_faces)
-    state = estimate_pose(frame, face_cascade, eye_cascade, mouth_cascade, profile_cascade)
+    state = estimate_pose(frame, face_cascade, eye_cascade, mouth_cascade, profile_cascade) if must_detect else None
     now = time.monotonic()
     avatar_face_box = detect_avatar_face_box(avatar, face_cascade, profile_cascade)
 
@@ -2302,6 +2311,7 @@ def main() -> int:
     print(f"eye_animation={args.eye_animation}")
     print(f"mouth_animation={args.mouth_animation}")
     print(f"max_faces={max(1, int(args.max_faces))}")
+    print(f"detect_every={max(1, int(args.detect_every))}")
     print(f"fallback_style={args.fallback_style}")
     print(f"background_mode={args.background_mode}")
     print(f"gpio_avatar_select={'on' if gpio_selector.enabled else 'off'}")
@@ -2336,6 +2346,7 @@ def main() -> int:
                 args.eye_animation,
                 args.mouth_animation,
                 max(1, int(args.max_faces)),
+                max(1, int(args.detect_every)),
             )
             if output_frame.shape[1] != output_spec.width or output_frame.shape[0] != output_spec.height:
                 output_frame = cv2.resize(output_frame, (output_spec.width, output_spec.height), interpolation=cv2.INTER_AREA)
