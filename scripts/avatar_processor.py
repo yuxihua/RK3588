@@ -1615,6 +1615,38 @@ def detect_face(
             mirrored_x = frame_w - (x + w)
             candidates.append(_rescale_box((mirrored_x, y, w, h), scale))
 
+    if len(candidates) == 0 and TRACKING_STATE.face is not None:
+        prev_x, prev_y, prev_w, prev_h = TRACKING_STATE.face
+        frame_h, frame_w = gray.shape[:2]
+        roi_x1 = max(0, int(prev_x - prev_w * 0.45 * scale))
+        roi_y1 = max(0, int(prev_y - prev_h * 0.55 * scale))
+        roi_x2 = min(frame_w, int((prev_x + prev_w) + prev_w * 0.45 * scale))
+        roi_y2 = min(frame_h, int((prev_y + prev_h) + prev_h * 0.65 * scale))
+
+        if roi_x2 - roi_x1 >= min_side and roi_y2 - roi_y1 >= min_side:
+            roi_gray = gray[roi_y1:roi_y2, roi_x1:roi_x2]
+            tracked_min_side = max(24, int(min(prev_w, prev_h) * 0.42 * scale))
+            tracked_faces = cascade.detectMultiScale(
+                roi_gray,
+                scaleFactor=1.08,
+                minNeighbors=3,
+                minSize=(tracked_min_side, tracked_min_side),
+            )
+            for face in tracked_faces:
+                x, y, w, h = (int(value) for value in face)
+                candidates.append(_rescale_box((x + roi_x1, y + roi_y1, w, h), scale))
+
+    if len(candidates) == 0:
+        equalized = cv2.equalizeHist(gray)
+        recovery_faces = cascade.detectMultiScale(
+            equalized,
+            scaleFactor=1.08,
+            minNeighbors=3,
+            minSize=(max(28, int(56 * scale)), max(28, int(56 * scale))),
+        )
+        for face in recovery_faces:
+            candidates.append(_rescale_box(tuple(int(value) for value in face), scale))
+
     if len(candidates) == 0:
         return None
     candidates = sorted(candidates, key=lambda item: item[2] * item[3], reverse=True)
