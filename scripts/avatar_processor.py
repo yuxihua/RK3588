@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import random
 import re
@@ -13,7 +14,7 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from http import server as http_server
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -47,6 +48,76 @@ class TrackingState:
     blink_progress: float = 0.0
     next_blink_at: float = 0.0
     last_face_at: float = 0.0
+
+
+@dataclass
+class RuntimeSettings:
+    render_mode: str = "beauty"
+    beauty_strength: float = 0.45
+    background_mode: str = "camera"
+    avatar_scale: float = 1.0
+    eye_animation: str = "subtle"
+    mouth_animation: str = "normal"
+    mouth_y_offset: float = 0.0
+    mouth_x_offset: float = 0.0
+    detect_every: int = 2
+    max_faces: int = 1
+    network_jpeg_quality: int = 70
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def snapshot(self) -> Dict[str, object]:
+        with self._lock:
+            return {
+                "render_mode": self.render_mode,
+                "beauty_strength": self.beauty_strength,
+                "background_mode": self.background_mode,
+                "avatar_scale": self.avatar_scale,
+                "eye_animation": self.eye_animation,
+                "mouth_animation": self.mouth_animation,
+                "mouth_y_offset": self.mouth_y_offset,
+                "mouth_x_offset": self.mouth_x_offset,
+                "detect_every": self.detect_every,
+                "max_faces": self.max_faces,
+                "network_jpeg_quality": self.network_jpeg_quality,
+            }
+
+    def update_from_dict(self, updates: Dict[str, object]) -> Dict[str, object]:
+        applied: Dict[str, object] = {}
+        with self._lock:
+            if "render_mode" in updates and str(updates["render_mode"]) in {"beauty", "avatar"}:
+                self.render_mode = str(updates["render_mode"])
+                applied["render_mode"] = self.render_mode
+            if "beauty_strength" in updates:
+                self.beauty_strength = float(np.clip(float(updates["beauty_strength"]), 0.0, 1.0))
+                applied["beauty_strength"] = self.beauty_strength
+            if "background_mode" in updates and str(updates["background_mode"]) in {"camera", "virtual"}:
+                self.background_mode = str(updates["background_mode"])
+                applied["background_mode"] = self.background_mode
+            if "avatar_scale" in updates:
+                self.avatar_scale = float(np.clip(float(updates["avatar_scale"]), 0.6, 3.0))
+                applied["avatar_scale"] = self.avatar_scale
+            if "eye_animation" in updates and str(updates["eye_animation"]) in {"off", "subtle", "normal"}:
+                self.eye_animation = str(updates["eye_animation"])
+                applied["eye_animation"] = self.eye_animation
+            if "mouth_animation" in updates and str(updates["mouth_animation"]) in {"off", "subtle", "normal"}:
+                self.mouth_animation = str(updates["mouth_animation"])
+                applied["mouth_animation"] = self.mouth_animation
+            if "mouth_y_offset" in updates:
+                self.mouth_y_offset = float(np.clip(float(updates["mouth_y_offset"]), -0.30, 0.30))
+                applied["mouth_y_offset"] = self.mouth_y_offset
+            if "mouth_x_offset" in updates:
+                self.mouth_x_offset = float(np.clip(float(updates["mouth_x_offset"]), -0.30, 0.30))
+                applied["mouth_x_offset"] = self.mouth_x_offset
+            if "detect_every" in updates:
+                self.detect_every = int(np.clip(int(updates["detect_every"]), 1, 6))
+                applied["detect_every"] = self.detect_every
+            if "max_faces" in updates:
+                self.max_faces = int(np.clip(int(updates["max_faces"]), 1, 2))
+                applied["max_faces"] = self.max_faces
+            if "network_jpeg_quality" in updates:
+                self.network_jpeg_quality = int(np.clip(int(updates["network_jpeg_quality"]), 40, 95))
+                applied["network_jpeg_quality"] = self.network_jpeg_quality
+        return applied
 
 
 STOP_REQUESTED = False
@@ -440,11 +511,14 @@ class _ThreadedHTTPServer(socketserver.ThreadingMixIn, http_server.HTTPServer):
 
 
 class NetworkMjpegWriter:
-    def __init__(self, host: str, port: int, path: str, jpeg_quality: int):
+    def __init__(self, host: str, port: int, path: str, jpeg_quality: int, runtime_settings: Optional[RuntimeSettings] = None):
         self.host = host
         self.port = int(port)
         self.path = path if path.startswith("/") else f"/{path}"
         self.jpeg_quality = max(30, min(100, int(jpeg_quality)))
+        self.runtime_settings = runtime_settings
+        self.ui_path = "/ui"
+        self.settings_path = "/api/settings"
 
         self._lock = threading.Condition()
         self._jpeg_frame: Optional[bytes] = None
@@ -453,9 +527,91 @@ class NetworkMjpegWriter:
 
         writer = self
 
+        def _send_json(handler: http_server.BaseHTTPRequestHandler, payload: Dict[str, object], status: int = 200) -> None:
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            handler.send_response(status)
+            handler.send_header("Content-Type", "application/json; charset=utf-8")
+            handler.send_header("Cache-Control", "no-cache")
+            handler.send_header("Content-Length", str(len(body)))
+            handler.end_headers()
+            handler.wfile.write(body)
+
+        def _ui_html() -> str:
+            stream_src = writer.path
+            return f"""<!doctype html>
+<html lang=\"zh-CN\">
+<head>
+    <meta charset=\"utf-8\" />
+    <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />
+    <title>Avatar Gateway 控制台</title>
+    <style>
+        body {{ margin:0; font-family:Segoe UI,Arial,sans-serif; background:#0b1020; color:#e8f0ff; }}
+        .wrap {{ max-width:1100px; margin:18px auto; padding:0 12px; display:grid; grid-template-columns:2fr 1fr; gap:12px; }}
+        .card {{ background:#121a33; border:1px solid #1f2a4d; border-radius:10px; padding:10px; }}
+        img {{ width:100%; border-radius:8px; background:#000; }}
+        .row {{ margin:8px 0; }}
+        label {{ font-size:13px; display:block; margin-bottom:4px; color:#aecdff; }}
+        input,select {{ width:100%; padding:6px; border-radius:6px; border:1px solid #2f3d6a; background:#0d1530; color:#eef4ff; }}
+        button {{ margin-top:8px; width:100%; padding:9px; border:none; border-radius:6px; background:#3a79ff; color:#fff; font-weight:600; cursor:pointer; }}
+        .tip {{ font-size:12px; color:#93a7d8; margin-top:8px; }}
+    </style>
+</head>
+<body>
+    <div class=\"wrap\">
+        <div class=\"card\"><img src=\"{stream_src}\" alt=\"stream\" /></div>
+        <div class=\"card\">
+            <div class=\"row\"><label>渲染模式</label><select id=\"render_mode\"><option value=\"beauty\">beauty</option><option value=\"avatar\">avatar</option></select></div>
+            <div class=\"row\"><label>美颜强度 (0-1)</label><input id=\"beauty_strength\" type=\"number\" min=\"0\" max=\"1\" step=\"0.01\" /></div>
+            <div class=\"row\"><label>头像缩放</label><input id=\"avatar_scale\" type=\"number\" min=\"0.6\" max=\"3\" step=\"0.01\" /></div>
+            <div class=\"row\"><label>口型上下偏移</label><input id=\"mouth_y_offset\" type=\"number\" min=\"-0.3\" max=\"0.3\" step=\"0.01\" /></div>
+            <div class=\"row\"><label>口型左右偏移</label><input id=\"mouth_x_offset\" type=\"number\" min=\"-0.3\" max=\"0.3\" step=\"0.01\" /></div>
+            <div class=\"row\"><label>重检测间隔</label><input id=\"detect_every\" type=\"number\" min=\"1\" max=\"6\" step=\"1\" /></div>
+            <div class=\"row\"><label>网络JPEG质量</label><input id=\"network_jpeg_quality\" type=\"number\" min=\"40\" max=\"95\" step=\"1\" /></div>
+            <button id=\"apply\">应用设置</button>
+            <div class=\"tip\" id=\"tip\">载入中...</div>
+        </div>
+    </div>
+    <script>
+        const ids = ["render_mode","beauty_strength","avatar_scale","mouth_y_offset","mouth_x_offset","detect_every","network_jpeg_quality"];
+        async function load() {{
+            const r = await fetch("{writer.settings_path}");
+            const d = await r.json();
+            for (const id of ids) {{ if (d[id] !== undefined) document.getElementById(id).value = d[id]; }}
+            document.getElementById('tip').textContent = '已连接，可实时调参';
+        }}
+        async function apply() {{
+            const payload = {{}};
+            for (const id of ids) payload[id] = document.getElementById(id).value;
+            const r = await fetch("{writer.settings_path}", {{method:"POST", headers:{{"Content-Type":"application/json"}}, body: JSON.stringify(payload)}});
+            const d = await r.json();
+            document.getElementById('tip').textContent = '已应用: ' + JSON.stringify(d.applied || d);
+        }}
+        document.getElementById('apply').addEventListener('click', apply);
+        load();
+    </script>
+</body>
+</html>"""
+
         class MjpegHandler(http_server.BaseHTTPRequestHandler):
             def do_GET(self):  # noqa: N802
                 parsed = urlparse(self.path)
+                if parsed.path == writer.settings_path:
+                    if writer.runtime_settings is None:
+                        _send_json(self, {"error": "runtime settings unavailable"}, 503)
+                    else:
+                        _send_json(self, writer.runtime_settings.snapshot(), 200)
+                    return
+
+                if parsed.path in {writer.ui_path, "/control"}:
+                    body = _ui_html().encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+
                 if parsed.path not in (writer.path, "/"):
                     self.send_response(404)
                     self.end_headers()
@@ -493,6 +649,30 @@ class NetworkMjpegWriter:
                     except (BrokenPipeError, ConnectionResetError):
                         return
 
+            def do_POST(self):  # noqa: N802
+                parsed = urlparse(self.path)
+                if parsed.path != writer.settings_path:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+
+                if writer.runtime_settings is None:
+                    _send_json(self, {"error": "runtime settings unavailable"}, 503)
+                    return
+
+                length = int(self.headers.get("Content-Length", "0") or "0")
+                raw = self.rfile.read(length) if length > 0 else b"{}"
+                try:
+                    payload = json.loads(raw.decode("utf-8") or "{}")
+                    if not isinstance(payload, dict):
+                        raise ValueError("invalid payload")
+                except Exception:
+                    _send_json(self, {"error": "invalid json payload"}, 400)
+                    return
+
+                applied = writer.runtime_settings.update_from_dict(payload)
+                _send_json(self, {"applied": applied, "settings": writer.runtime_settings.snapshot()}, 200)
+
             def log_message(self, format: str, *args):  # noqa: A003
                 return
 
@@ -501,10 +681,14 @@ class NetworkMjpegWriter:
         self._thread.start()
 
     def write(self, frame: np.ndarray) -> None:
+        if self.runtime_settings is not None:
+            quality = int(self.runtime_settings.snapshot().get("network_jpeg_quality", self.jpeg_quality))
+        else:
+            quality = self.jpeg_quality
         ok, encoded = cv2.imencode(
             ".jpg",
             np.ascontiguousarray(frame),
-            [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality],
+            [int(cv2.IMWRITE_JPEG_QUALITY), max(30, min(100, int(quality)))],
         )
         if not ok:
             raise RuntimeError("网络输出 JPEG 编码失败")
@@ -529,21 +713,23 @@ class NetworkMjpegWriter:
             pass
 
 
-def create_network_writer(args, spec: FrameSpec) -> Tuple[object, FrameSpec, str]:
+def create_network_writer(args, spec: FrameSpec, runtime_settings: Optional[RuntimeSettings] = None) -> Tuple[object, FrameSpec, str]:
     writer = NetworkMjpegWriter(
         host=args.network_host,
         port=args.network_port,
         path=args.network_path,
         jpeg_quality=args.network_jpeg_quality,
+        runtime_settings=runtime_settings,
     )
     display_host = args.network_host if args.network_host not in {"0.0.0.0", "::"} else "<board-ip>"
     stream_url = f"http://{display_host}:{args.network_port}{writer.path}"
-    return writer, FrameSpec(width=spec.width, height=spec.height, fps=spec.fps), stream_url
+    control_url = f"http://{display_host}:{args.network_port}{writer.ui_path}"
+    return writer, FrameSpec(width=spec.width, height=spec.height, fps=spec.fps), f"{stream_url} (control: {control_url})"
 
 
-def create_output_writer(args, spec: FrameSpec) -> Tuple[object, FrameSpec, str]:
+def create_output_writer(args, spec: FrameSpec, runtime_settings: Optional[RuntimeSettings] = None) -> Tuple[object, FrameSpec, str]:
     if args.output_mode == "network":
-        return create_network_writer(args, spec)
+        return create_network_writer(args, spec, runtime_settings)
 
     writer, output_spec = create_writer(args.output, spec)
     return writer, output_spec, args.output
@@ -2319,9 +2505,23 @@ def process_frame(
     mouth_x_offset: float,
     max_faces: int,
     detect_every: int,
+    runtime_settings: Optional[RuntimeSettings] = None,
 ) -> np.ndarray:
     global FRAME_COUNTER
     FRAME_COUNTER += 1
+
+    if runtime_settings is not None:
+        cfg = runtime_settings.snapshot()
+        render_mode = str(cfg.get("render_mode", render_mode))
+        beauty_strength = float(cfg.get("beauty_strength", beauty_strength))
+        background_mode = str(cfg.get("background_mode", background_mode))
+        avatar_scale = float(cfg.get("avatar_scale", avatar_scale))
+        eye_animation = str(cfg.get("eye_animation", eye_animation))
+        mouth_animation = str(cfg.get("mouth_animation", mouth_animation))
+        mouth_y_offset = float(cfg.get("mouth_y_offset", mouth_y_offset))
+        mouth_x_offset = float(cfg.get("mouth_x_offset", mouth_x_offset))
+        max_faces = int(cfg.get("max_faces", max_faces))
+        detect_every = int(cfg.get("detect_every", detect_every))
 
     detect_stride = max(1, int(detect_every))
     must_detect = TRACKING_STATE.face is None or (FRAME_COUNTER % detect_stride == 0)
@@ -2429,6 +2629,19 @@ def process_frame(
 def main() -> int:
     args = build_parser().parse_args()
     spec = FrameSpec(width=args.width, height=args.height, fps=args.fps)
+    runtime_settings = RuntimeSettings(
+        render_mode=args.render_mode,
+        beauty_strength=float(args.beauty_strength),
+        background_mode=args.background_mode,
+        avatar_scale=float(args.avatar_scale),
+        eye_animation=args.eye_animation,
+        mouth_animation=args.mouth_animation,
+        mouth_y_offset=float(args.mouth_y_offset),
+        mouth_x_offset=float(args.mouth_x_offset),
+        detect_every=max(1, int(args.detect_every)),
+        max_faces=max(1, int(args.max_faces)),
+        network_jpeg_quality=max(40, min(95, int(args.network_jpeg_quality))),
+    )
 
     avatar_path = resolve_avatar_path(args.avatar, args.avatar_dir, args.avatar_name)
     avatar = load_avatar(avatar_path)
@@ -2456,7 +2669,7 @@ def main() -> int:
     mouth_cascade = load_cascade("haarcascade_smile.xml")
 
     capture = create_capture(args.camera, spec)
-    writer, output_spec, output_desc = create_output_writer(args, spec)
+    writer, output_spec, output_desc = create_output_writer(args, spec, runtime_settings)
 
     print(f"camera={args.camera}")
     print(f"render_mode={args.render_mode}")
@@ -2514,6 +2727,7 @@ def main() -> int:
                 args.mouth_x_offset,
                 max(1, int(args.max_faces)),
                 max(1, int(args.detect_every)),
+                runtime_settings,
             )
             if output_frame.shape[1] != output_spec.width or output_frame.shape[0] != output_spec.height:
                 output_frame = cv2.resize(output_frame, (output_spec.width, output_spec.height), interpolation=cv2.INTER_AREA)
@@ -2524,7 +2738,7 @@ def main() -> int:
                 sys.stdout.flush()
                 writer.release()
                 time.sleep(0.2)
-                writer, output_spec, output_desc = create_output_writer(args, spec)
+                writer, output_spec, output_desc = create_output_writer(args, spec, runtime_settings)
             time.sleep(frame_delay * 0.15)
     finally:
         capture.release()

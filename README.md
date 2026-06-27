@@ -106,6 +106,14 @@ GPIO 选择头像（GPIO0/GPIO1 两位共四种）：
 - 帧率：`15`
 - 网络 JPEG 质量：`70`
 
+网络模式下可直接使用浏览器调参：
+
+- 视频流地址：`http://<板子IP>:8080/mjpeg`
+- 控制页面：`http://<板子IP>:8080/ui`
+- 设置接口：`GET/POST http://<板子IP>:8080/api/settings`
+
+`/ui` 页面支持实时调整 `render_mode`、`beauty_strength`、`avatar_scale`、`mouth_x_offset`、`mouth_y_offset`、`detect_every`、`network_jpeg_quality`，提交后立即生效。
+
 如果你的设备号不同，可以在页面里改。
 
 GPIO 引脚和头像映射可在 `/etc/default/avatar-gateway` 修改，例如：
