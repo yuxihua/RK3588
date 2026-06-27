@@ -1423,7 +1423,7 @@ def animate_avatar_features(avatar_rgba: np.ndarray, blink_progress: float, mout
     blink = float(np.clip(blink_progress, 0.0, 1.0))
     mouth_raw = float(np.clip(mouth_open, 0.0, 1.0))
     # Stronger amplification for low-resolution camera input.
-    mouth = float(np.clip((mouth_raw - 0.01) * 4.0, 0.0, 1.0))
+    mouth = float(np.clip((mouth_raw - 0.005) * 5.0, 0.0, 1.0))
 
     eye_box_w = max(12, int(w * 0.24))
     eye_box_h = max(10, int(h * 0.16))
@@ -1444,24 +1444,24 @@ def animate_avatar_features(avatar_rgba: np.ndarray, blink_progress: float, mout
 
         animated[y1:y2, x1:x2] = squeezed
 
-    mouth_box_w = max(18, int(w * 0.26))
-    mouth_box_h = max(12, int(h * 0.16))
+    mouth_box_w = max(24, int(w * 0.30))
+    mouth_box_h = max(16, int(h * 0.20))
     mouth_cx = int(w * 0.50)
     # Portrait avatars often include torso; place mouth ROI in upper face area.
-    mouth_cy = int(h * 0.52)
+    mouth_cy = int(h * 0.44)
     mx1 = max(0, mouth_cx - mouth_box_w // 2)
     mx2 = min(w, mouth_cx + mouth_box_w // 2)
     my1 = max(0, mouth_cy - mouth_box_h // 2)
     my2 = min(h, mouth_cy + mouth_box_h // 2)
 
-    if mouth > 0.01 and mx2 - mx1 >= 2 and my2 - my1 >= 2:
+    if mouth > 0.005 and mx2 - mx1 >= 2 and my2 - my1 >= 2:
         mouth_roi = animated[my1:my2, mx1:mx2]
         roi_h, roi_w = mouth_roi.shape[:2]
         mid = max(1, roi_h // 2)
         top = mouth_roi[:mid, :].copy()
         bottom = mouth_roi[mid:, :].copy()
 
-        shift = max(1, int(roi_h * 0.65 * mouth))
+        shift = max(1, int(roi_h * 0.85 * mouth))
         modified = mouth_roi.copy()
         modified[:mid, :] = top
 
@@ -1477,9 +1477,17 @@ def animate_avatar_features(avatar_rgba: np.ndarray, blink_progress: float, mout
                 bridge = cv2.resize(bridge_src, (roi_w, dst_start - mid), interpolation=cv2.INTER_LINEAR)
                 modified[mid:dst_start, :] = bridge
 
-        blend = float(np.clip(0.52 + mouth * 0.40, 0.52, 0.92))
+        blend = float(np.clip(0.60 + mouth * 0.35, 0.60, 0.95))
         mixed = mouth_roi.astype(np.float32) * (1.0 - blend) + modified.astype(np.float32) * blend
-        animated[my1:my2, mx1:mx2] = np.clip(mixed, 0, 255).astype(np.uint8)
+        mixed_u8 = np.clip(mixed, 0, 255).astype(np.uint8)
+
+        # Recover local sharpness so mouth motion is visible and less blurry.
+        mouth_bgr = mixed_u8[:, :, :3]
+        blur = cv2.GaussianBlur(mouth_bgr, (0, 0), 1.0)
+        sharp = cv2.addWeighted(mouth_bgr, 1.65, blur, -0.65, 0)
+        mixed_u8[:, :, :3] = np.clip(sharp, 0, 255).astype(np.uint8)
+
+        animated[my1:my2, mx1:mx2] = mixed_u8
 
     return animated
 
