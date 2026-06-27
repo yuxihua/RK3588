@@ -120,8 +120,15 @@ GPIO 选择头像（GPIO0/GPIO1 两位共四种）：
 - 磨皮：`skin_smoothness`
 - 提亮：`skin_brightness`
 - 锐化：`skin_sharpen`
+- 脸部：`face_slim`、`face_round`
+- 眼睛：`eye_enlarge`、`eye_spacing`
+- 眉毛：`eyebrow_height`、`eyebrow_angle`
+- 鼻子：`nose_bridge`、`nose_highlight`
+- 嘴巴：`mouth_size`、`lip_color`
+- 全身：`body_slim`
+- 美妆滤镜：`filter_style`
 
-如果你想要更明显的美颜效果，通常先选 `bright` 或 `glow`，再把 `beauty_strength` 和 `skin_brightness` 往上调一点。
+如果你想要更明显的美颜效果，通常先选 `bright` 或 `glow`，再把 `beauty_strength`、`skin_brightness` 和 `face_slim` 往上调一点。
 
 如果你的设备号不同，可以在页面里改。
 

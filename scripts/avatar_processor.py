@@ -58,6 +58,18 @@ class RuntimeSettings:
     skin_smoothness: float = 0.45
     skin_brightness: float = 0.10
     skin_sharpen: float = 0.10
+    face_slim: float = 0.20
+    face_round: float = 0.00
+    eye_enlarge: float = 0.20
+    eye_spacing: float = 0.00
+    eyebrow_height: float = 0.00
+    eyebrow_angle: float = 0.00
+    nose_highlight: float = 0.10
+    nose_bridge: float = 0.10
+    mouth_size: float = 0.10
+    lip_color: float = 0.10
+    body_slim: float = 0.00
+    filter_style: str = "none"
     background_mode: str = "camera"
     avatar_scale: float = 1.0
     eye_animation: str = "subtle"
@@ -78,6 +90,18 @@ class RuntimeSettings:
                 "skin_smoothness": self.skin_smoothness,
                 "skin_brightness": self.skin_brightness,
                 "skin_sharpen": self.skin_sharpen,
+                "face_slim": self.face_slim,
+                "face_round": self.face_round,
+                "eye_enlarge": self.eye_enlarge,
+                "eye_spacing": self.eye_spacing,
+                "eyebrow_height": self.eyebrow_height,
+                "eyebrow_angle": self.eyebrow_angle,
+                "nose_highlight": self.nose_highlight,
+                "nose_bridge": self.nose_bridge,
+                "mouth_size": self.mouth_size,
+                "lip_color": self.lip_color,
+                "body_slim": self.body_slim,
+                "filter_style": self.filter_style,
                 "background_mode": self.background_mode,
                 "avatar_scale": self.avatar_scale,
                 "eye_animation": self.eye_animation,
@@ -92,11 +116,11 @@ class RuntimeSettings:
     def update_from_dict(self, updates: Dict[str, object]) -> Dict[str, object]:
         applied: Dict[str, object] = {}
         preset_map: Dict[str, Dict[str, float]] = {
-            "natural": {"skin_smoothness": 0.35, "skin_brightness": 0.05, "skin_sharpen": 0.08},
-            "soft": {"skin_smoothness": 0.62, "skin_brightness": 0.08, "skin_sharpen": 0.04},
-            "bright": {"skin_smoothness": 0.45, "skin_brightness": 0.18, "skin_sharpen": 0.06},
-            "clear": {"skin_smoothness": 0.42, "skin_brightness": 0.10, "skin_sharpen": 0.22},
-            "glow": {"skin_smoothness": 0.55, "skin_brightness": 0.16, "skin_sharpen": 0.10},
+            "natural": {"skin_smoothness": 0.35, "skin_brightness": 0.05, "skin_sharpen": 0.08, "face_slim": 0.12, "eye_enlarge": 0.12, "nose_highlight": 0.06, "mouth_size": 0.06, "lip_color": 0.05},
+            "soft": {"skin_smoothness": 0.62, "skin_brightness": 0.08, "skin_sharpen": 0.04, "face_slim": 0.18, "eye_enlarge": 0.18, "nose_highlight": 0.08, "mouth_size": 0.07, "lip_color": 0.07},
+            "bright": {"skin_smoothness": 0.45, "skin_brightness": 0.18, "skin_sharpen": 0.06, "face_slim": 0.16, "eye_enlarge": 0.18, "nose_highlight": 0.16, "mouth_size": 0.10, "lip_color": 0.12},
+            "clear": {"skin_smoothness": 0.42, "skin_brightness": 0.10, "skin_sharpen": 0.22, "face_slim": 0.18, "eye_enlarge": 0.14, "nose_highlight": 0.10, "mouth_size": 0.08, "lip_color": 0.08},
+            "glow": {"skin_smoothness": 0.55, "skin_brightness": 0.16, "skin_sharpen": 0.10, "face_slim": 0.15, "eye_enlarge": 0.22, "nose_highlight": 0.18, "mouth_size": 0.12, "lip_color": 0.15},
         }
         with self._lock:
             if "render_mode" in updates and str(updates["render_mode"]) in {"beauty", "avatar"}:
@@ -122,6 +146,44 @@ class RuntimeSettings:
             if "skin_sharpen" in updates:
                 self.skin_sharpen = float(np.clip(float(updates["skin_sharpen"]), 0.0, 1.0))
                 applied["skin_sharpen"] = self.skin_sharpen
+            if "face_slim" in updates:
+                self.face_slim = float(np.clip(float(updates["face_slim"]), 0.0, 1.0))
+                applied["face_slim"] = self.face_slim
+            if "face_round" in updates:
+                self.face_round = float(np.clip(float(updates["face_round"]), 0.0, 1.0))
+                applied["face_round"] = self.face_round
+            if "eye_enlarge" in updates:
+                self.eye_enlarge = float(np.clip(float(updates["eye_enlarge"]), 0.0, 1.0))
+                applied["eye_enlarge"] = self.eye_enlarge
+            if "eye_spacing" in updates:
+                self.eye_spacing = float(np.clip(float(updates["eye_spacing"]), -0.5, 0.5))
+                applied["eye_spacing"] = self.eye_spacing
+            if "eyebrow_height" in updates:
+                self.eyebrow_height = float(np.clip(float(updates["eyebrow_height"]), -0.5, 0.5))
+                applied["eyebrow_height"] = self.eyebrow_height
+            if "eyebrow_angle" in updates:
+                self.eyebrow_angle = float(np.clip(float(updates["eyebrow_angle"]), -45.0, 45.0))
+                applied["eyebrow_angle"] = self.eyebrow_angle
+            if "nose_highlight" in updates:
+                self.nose_highlight = float(np.clip(float(updates["nose_highlight"]), 0.0, 1.0))
+                applied["nose_highlight"] = self.nose_highlight
+            if "nose_bridge" in updates:
+                self.nose_bridge = float(np.clip(float(updates["nose_bridge"]), 0.0, 1.0))
+                applied["nose_bridge"] = self.nose_bridge
+            if "mouth_size" in updates:
+                self.mouth_size = float(np.clip(float(updates["mouth_size"]), 0.0, 1.0))
+                applied["mouth_size"] = self.mouth_size
+            if "lip_color" in updates:
+                self.lip_color = float(np.clip(float(updates["lip_color"]), 0.0, 1.0))
+                applied["lip_color"] = self.lip_color
+            if "body_slim" in updates:
+                self.body_slim = float(np.clip(float(updates["body_slim"]), 0.0, 1.0))
+                applied["body_slim"] = self.body_slim
+            if "filter_style" in updates:
+                style = str(updates["filter_style"])
+                if style in {"none", "natural", "clean", "cool", "warm"}:
+                    self.filter_style = style
+                    applied["filter_style"] = self.filter_style
             if "background_mode" in updates and str(updates["background_mode"]) in {"camera", "virtual"}:
                 self.background_mode = str(updates["background_mode"])
                 applied["background_mode"] = self.background_mode
@@ -582,34 +644,64 @@ class NetworkMjpegWriter:
         .card {{ background:#121a33; border:1px solid #1f2a4d; border-radius:10px; padding:10px; }}
         img {{ width:100%; border-radius:8px; background:#000; }}
         .row {{ margin:8px 0; }}
+        .section {{ margin-top:14px; padding-top:10px; border-top:1px solid #1f2a4d; font-weight:700; color:#d6e4ff; }}
         label {{ font-size:13px; display:block; margin-bottom:4px; color:#aecdff; }}
         input,select {{ width:100%; padding:6px; border-radius:6px; border:1px solid #2f3d6a; background:#0d1530; color:#eef4ff; }}
+        input[type="range"] {{ padding:0; height:20px; }}
         button {{ margin-top:8px; width:100%; padding:9px; border:none; border-radius:6px; background:#3a79ff; color:#fff; font-weight:600; cursor:pointer; }}
         .tip {{ font-size:12px; color:#93a7d8; margin-top:8px; }}
     </style>
 </head>
 <body>
     <div class=\"wrap\">
-        <div class=\"card\"><img src=\"{stream_src}\" alt=\"stream\" /></div>
+        <div class="card"><img src="{stream_src}" alt="stream" /></div>
         <div class="card">
             <div class="row"><label>美颜预设</label><select id="beauty_preset"><option value="natural">自然</option><option value="soft">柔和</option><option value="bright">提亮</option><option value="clear">清透</option><option value="glow">焕肤</option></select></div>
-            <div class=\"row\"><label>渲染模式</label><select id=\"render_mode\"><option value=\"beauty\">beauty</option><option value=\"avatar\">avatar</option></select></div>
-            <div class=\"row\"><label>美颜强度 (0-1)</label><input id=\"beauty_strength\" type=\"number\" min=\"0\" max=\"1\" step=\"0.01\" /></div>
+            <div class="row"><label>渲染模式</label><select id="render_mode"><option value="beauty">beauty</option><option value="avatar">avatar</option></select></div>
+            <div class="row"><label>美颜强度 (0-1)</label><input id="beauty_strength" type="number" min="0" max="1" step="0.01" /></div>
             <div class="row"><label>磨皮</label><input id="skin_smoothness" type="range" min="0" max="1" step="0.01" /></div>
             <div class="row"><label>提亮</label><input id="skin_brightness" type="range" min="0" max="1" step="0.01" /></div>
             <div class="row"><label>锐化</label><input id="skin_sharpen" type="range" min="0" max="1" step="0.01" /></div>
-            <div class=\"row\"><label>头像缩放</label><input id=\"avatar_scale\" type=\"number\" min=\"0.6\" max=\"3\" step=\"0.01\" /></div>
-            <div class=\"row\"><label>口型上下偏移</label><input id=\"mouth_y_offset\" type=\"number\" min=\"-0.3\" max=\"0.3\" step=\"0.01\" /></div>
-            <div class=\"row\"><label>口型左右偏移</label><input id=\"mouth_x_offset\" type=\"number\" min=\"-0.3\" max=\"0.3\" step=\"0.01\" /></div>
-            <div class=\"row\"><label>重检测间隔</label><input id=\"detect_every\" type=\"number\" min=\"1\" max=\"6\" step=\"1\" /></div>
-            <div class=\"row\"><label>网络JPEG质量</label><input id=\"network_jpeg_quality\" type=\"number\" min=\"40\" max=\"95\" step=\"1\" /></div>
+
+            <div class="section">脸部</div>
+            <div class="row"><label>瘦脸</label><input id="face_slim" type="range" min="0" max="1" step="0.01" /></div>
+            <div class="row"><label>圆脸</label><input id="face_round" type="range" min="0" max="1" step="0.01" /></div>
+
+            <div class="section">眼睛</div>
+            <div class="row"><label>大眼</label><input id="eye_enlarge" type="range" min="0" max="1" step="0.01" /></div>
+            <div class="row"><label>眼距</label><input id="eye_spacing" type="range" min="-0.5" max="0.5" step="0.01" /></div>
+
+            <div class="section">眉毛</div>
+            <div class="row"><label>眉毛高度</label><input id="eyebrow_height" type="range" min="-0.5" max="0.5" step="0.01" /></div>
+            <div class="row"><label>眉毛角度</label><input id="eyebrow_angle" type="range" min="-45" max="45" step="1" /></div>
+
+            <div class="section">鼻子</div>
+            <div class="row"><label>鼻梁</label><input id="nose_bridge" type="range" min="0" max="1" step="0.01" /></div>
+            <div class="row"><label>鼻部高光</label><input id="nose_highlight" type="range" min="0" max="1" step="0.01" /></div>
+
+            <div class="section">嘴巴</div>
+            <div class="row"><label>嘴型</label><input id="mouth_size" type="range" min="0" max="1" step="0.01" /></div>
+            <div class="row"><label>唇色</label><input id="lip_color" type="range" min="0" max="1" step="0.01" /></div>
+
+            <div class="section">全身</div>
+            <div class="row"><label>瘦身</label><input id="body_slim" type="range" min="0" max="1" step="0.01" /></div>
+
+            <div class="section">美妆</div>
+            <div class="row"><label>滤镜风格</label><select id="filter_style"><option value="none">无</option><option value="natural">自然</option><option value="clean">清透</option><option value="cool">冷调</option><option value="warm">暖调</option></select></div>
+
+            <div class="section">其他</div>
+            <div class="row"><label>头像缩放</label><input id="avatar_scale" type="number" min="0.6" max="3" step="0.01" /></div>
+            <div class="row"><label>口型上下偏移</label><input id="mouth_y_offset" type="number" min="-0.3" max="0.3" step="0.01" /></div>
+            <div class="row"><label>口型左右偏移</label><input id="mouth_x_offset" type="number" min="-0.3" max="0.3" step="0.01" /></div>
+            <div class="row"><label>重检测间隔</label><input id="detect_every" type="number" min="1" max="6" step="1" /></div>
+            <div class="row"><label>网络JPEG质量</label><input id="network_jpeg_quality" type="number" min="40" max="95" step="1" /></div>
             <button id=\"apply\">应用设置</button>
             <div class=\"tip\" id=\"tip\">载入中...</div>
         </div>
     </div>
     <script>
-        const ids = ["beauty_preset","render_mode","beauty_strength","skin_smoothness","skin_brightness","skin_sharpen","avatar_scale","mouth_y_offset","mouth_x_offset","detect_every","network_jpeg_quality"];
-        const sliderIds = ["skin_smoothness","skin_brightness","skin_sharpen"];
+        const ids = ["beauty_preset","render_mode","beauty_strength","skin_smoothness","skin_brightness","skin_sharpen","face_slim","face_round","eye_enlarge","eye_spacing","eyebrow_height","eyebrow_angle","nose_bridge","nose_highlight","mouth_size","lip_color","body_slim","filter_style","avatar_scale","mouth_y_offset","mouth_x_offset","detect_every","network_jpeg_quality"];
+        const sliderIds = ["skin_smoothness","skin_brightness","skin_sharpen","face_slim","face_round","eye_enlarge","eye_spacing","eyebrow_height","eyebrow_angle","nose_bridge","nose_highlight","mouth_size","lip_color","body_slim"];
         async function load() {{
             const r = await fetch("{writer.settings_path}");
             const d = await r.json();
@@ -2496,12 +2588,24 @@ def beautify_with_face(
     skin_smoothness: float,
     skin_brightness: float,
     skin_sharpen: float,
+    face_slim: float,
+    face_round: float,
+    eye_enlarge: float,
+    eye_spacing: float,
+    eyebrow_height: float,
+    eyebrow_angle: float,
+    nose_highlight: float,
+    nose_bridge: float,
+    mouth_size: float,
+    lip_color: float,
+    body_slim: float,
+    filter_style: str,
 ) -> np.ndarray:
     x, y, w, h = face
     frame_h, frame_w = frame.shape[:2]
 
-    pad_x = int(w * 0.28)
-    pad_y = int(h * 0.34)
+    pad_x = int(w * (0.28 - 0.08 * float(np.clip(face_slim, 0.0, 1.0)) - 0.03 * float(np.clip(body_slim, 0.0, 1.0))))
+    pad_y = int(h * (0.34 + 0.06 * float(np.clip(face_round, 0.0, 1.0))))
     x1 = max(0, x - pad_x)
     y1 = max(0, y - pad_y)
     x2 = min(frame_w, x + w + pad_x)
@@ -2532,12 +2636,24 @@ def beautify_with_face(
 
     roi_h, roi_w = roi.shape[:2]
     mask = np.zeros((roi_h, roi_w), dtype=np.uint8)
-    local_cx = int((x + w * 0.5) - x1)
-    local_cy = int((y + h * 0.48) - y1)
-    rx = max(8, int(w * 0.60))
-    ry = max(10, int(h * 0.80))
+    local_cx = int((x + w * 0.5) - x1 + eye_spacing * w * 0.10 + np.tan(np.deg2rad(eyebrow_angle)) * h * 0.02)
+    local_cy = int((y + h * (0.48 - 0.06 * float(np.clip(eyebrow_height, -0.5, 0.5)))) - y1)
+    rx = max(8, int(w * (0.60 - 0.10 * float(np.clip(face_slim, 0.0, 1.0)) + 0.05 * float(np.clip(eye_enlarge, 0.0, 1.0)))))
+    ry = max(10, int(h * (0.80 + 0.08 * float(np.clip(face_round, 0.0, 1.0)))))
     cv2.ellipse(mask, (local_cx, local_cy), (rx, ry), 0, 0, 360, 255, -1)
     mask = cv2.GaussianBlur(mask, (0, 0), max(2.0, h * 0.14))
+
+    if nose_highlight > 0.0:
+        nose_mask = np.zeros((roi_h, roi_w), dtype=np.uint8)
+        cv2.ellipse(nose_mask, (local_cx, int(local_cy + h * (0.03 - 0.02 * nose_bridge))), (max(8, int(w * (0.14 + 0.05 * nose_bridge))), max(8, int(h * (0.18 + 0.04 * nose_bridge)))), 0, 0, 360, 255, -1)
+        nose_mask = cv2.GaussianBlur(nose_mask, (0, 0), max(1.5, h * 0.08))
+        mask = np.maximum(mask, (nose_mask.astype(np.float32) * (0.20 + 0.80 * nose_highlight)).astype(np.uint8))
+
+    if mouth_size > 0.0:
+        mouth_mask = np.zeros((roi_h, roi_w), dtype=np.uint8)
+        cv2.ellipse(mouth_mask, (local_cx, int(local_cy + h * 0.34)), (max(8, int(w * (0.18 + 0.08 * mouth_size))), max(6, int(h * (0.06 + 0.05 * mouth_size)))), 0, 0, 360, 255, -1)
+        mouth_mask = cv2.GaussianBlur(mouth_mask, (0, 0), max(1.5, h * 0.06))
+        mask = np.maximum(mask, (mouth_mask.astype(np.float32) * (0.18 + 0.82 * mouth_size)).astype(np.uint8))
 
     alpha = (mask.astype(np.float32) / 255.0)[:, :, None] * float(np.clip(strength, 0.0, 1.0))
     blended = roi.astype(np.float32) * (1.0 - alpha) + enhanced.astype(np.float32) * alpha
@@ -2547,6 +2663,28 @@ def beautify_with_face(
     y_channel = np.clip(y_channel + (6.0 + 10.0 * bright_amount) * alpha[:, :, 0], 0, 255)
     ycrcb[:, :, 0] = y_channel.astype(np.uint8)
     out_roi = cv2.cvtColor(ycrcb, cv2.COLOR_YCrCb2BGR)
+
+    if filter_style != "none":
+        if filter_style == "clean":
+            out_roi = cv2.addWeighted(out_roi, 1.04, cv2.GaussianBlur(out_roi, (0, 0), 1.0), -0.04, 0)
+        elif filter_style == "cool":
+            b, g, r = cv2.split(out_roi)
+            b = cv2.add(b, 6)
+            r = cv2.subtract(r, 3)
+            out_roi = cv2.merge((b, g, r))
+        elif filter_style == "warm":
+            b, g, r = cv2.split(out_roi)
+            r = cv2.add(r, 6)
+            b = cv2.subtract(b, 3)
+            out_roi = cv2.merge((b, g, r))
+        elif filter_style == "natural":
+            out_roi = cv2.addWeighted(out_roi, 1.02, cv2.GaussianBlur(out_roi, (0, 0), 0.8), -0.02, 0)
+
+    if lip_color > 0.0:
+        ycrcb = cv2.cvtColor(out_roi, cv2.COLOR_BGR2YCrCb)
+        lower_start = int(roi_h * 0.55)
+        ycrcb[lower_start:, :, 1] = np.clip(ycrcb[lower_start:, :, 1].astype(np.int16) + int(14 * lip_color), 0, 255).astype(np.uint8)
+        out_roi = cv2.cvtColor(ycrcb, cv2.COLOR_YCrCb2BGR)
 
     result = frame.copy()
     result[y1:y2, x1:x2] = out_roi
@@ -2565,6 +2703,18 @@ def process_frame(
     skin_smoothness: float,
     skin_brightness: float,
     skin_sharpen: float,
+    face_slim: float,
+    face_round: float,
+    eye_enlarge: float,
+    eye_spacing: float,
+    eyebrow_height: float,
+    eyebrow_angle: float,
+    nose_highlight: float,
+    nose_bridge: float,
+    mouth_size: float,
+    lip_color: float,
+    body_slim: float,
+    filter_style: str,
     fallback_style: str,
     background_mode: str,
     avatar_scale: float,
@@ -2586,6 +2736,18 @@ def process_frame(
         skin_smoothness = float(cfg.get("skin_smoothness", skin_smoothness))
         skin_brightness = float(cfg.get("skin_brightness", skin_brightness))
         skin_sharpen = float(cfg.get("skin_sharpen", skin_sharpen))
+        face_slim = float(cfg.get("face_slim", face_slim))
+        face_round = float(cfg.get("face_round", face_round))
+        eye_enlarge = float(cfg.get("eye_enlarge", eye_enlarge))
+        eye_spacing = float(cfg.get("eye_spacing", eye_spacing))
+        eyebrow_height = float(cfg.get("eyebrow_height", eyebrow_height))
+        eyebrow_angle = float(cfg.get("eyebrow_angle", eyebrow_angle))
+        nose_highlight = float(cfg.get("nose_highlight", nose_highlight))
+        nose_bridge = float(cfg.get("nose_bridge", nose_bridge))
+        mouth_size = float(cfg.get("mouth_size", mouth_size))
+        lip_color = float(cfg.get("lip_color", lip_color))
+        body_slim = float(cfg.get("body_slim", body_slim))
+        filter_style = str(cfg.get("filter_style", filter_style))
         background_mode = str(cfg.get("background_mode", background_mode))
         avatar_scale = float(cfg.get("avatar_scale", avatar_scale))
         eye_animation = str(cfg.get("eye_animation", eye_animation))
@@ -2603,7 +2765,26 @@ def process_frame(
         state = estimate_pose(frame, face_cascade, eye_cascade, mouth_cascade, profile_cascade) if must_detect else None
         if state is not None:
             state = update_tracking(state, now)
-            return beautify_with_face(frame, state.face, beauty_strength, skin_smoothness, skin_brightness, skin_sharpen)
+            return beautify_with_face(
+                frame,
+                state.face,
+                beauty_strength,
+                skin_smoothness,
+                skin_brightness,
+                skin_sharpen,
+                face_slim,
+                face_round,
+                eye_enlarge,
+                eye_spacing,
+                eyebrow_height,
+                eyebrow_angle,
+                nose_highlight,
+                nose_bridge,
+                mouth_size,
+                lip_color,
+                body_slim,
+                filter_style,
+            )
 
         if TRACKING_STATE.face is not None and (now - TRACKING_STATE.last_face_at) <= 0.32:
             smoothed_face = TRACKING_STATE.face
@@ -2613,7 +2794,26 @@ def process_frame(
                 int(smoothed_face[2]),
                 int(smoothed_face[3]),
             )
-            return beautify_with_face(frame, tracked_face, beauty_strength * 0.9, skin_smoothness, skin_brightness, skin_sharpen)
+            return beautify_with_face(
+                frame,
+                tracked_face,
+                beauty_strength * 0.9,
+                skin_smoothness,
+                skin_brightness,
+                skin_sharpen,
+                face_slim,
+                face_round,
+                eye_enlarge,
+                eye_spacing,
+                eyebrow_height,
+                eyebrow_angle,
+                nose_highlight,
+                nose_bridge,
+                mouth_size,
+                lip_color,
+                body_slim,
+                filter_style,
+            )
 
         return frame
 
@@ -2708,6 +2908,18 @@ def main() -> int:
         skin_smoothness=0.45,
         skin_brightness=0.10,
         skin_sharpen=0.10,
+        face_slim=0.20,
+        face_round=0.00,
+        eye_enlarge=0.20,
+        eye_spacing=0.00,
+        eyebrow_height=0.00,
+        eyebrow_angle=0.00,
+        nose_highlight=0.10,
+        nose_bridge=0.10,
+        mouth_size=0.10,
+        lip_color=0.10,
+        body_slim=0.00,
+        filter_style="none",
         background_mode=args.background_mode,
         avatar_scale=float(args.avatar_scale),
         eye_animation=args.eye_animation,
@@ -2797,6 +3009,18 @@ def main() -> int:
                 0.45,
                 0.10,
                 0.10,
+                0.20,
+                0.00,
+                0.20,
+                0.00,
+                0.00,
+                0.00,
+                0.10,
+                0.10,
+                0.10,
+                0.10,
+                0.00,
+                "none",
                 args.fallback_style,
                 args.background_mode,
                 args.avatar_scale,
