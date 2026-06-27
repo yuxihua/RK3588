@@ -105,6 +105,12 @@ def get_haarcascade_dir() -> Path:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="USB camera avatar processor")
+    parser.add_argument(
+        "--render-mode",
+        choices=["beauty", "avatar"],
+        default="beauty",
+        help="Render mode: beauty enhancement or avatar replacement",
+    )
     parser.add_argument("--output-mode", choices=["usb", "network"], default="usb", help="Output mode")
     parser.add_argument("--camera", default="/dev/video0", help="Input USB camera device")
     parser.add_argument("--output", default="auto", help="Output UVC gadget device, or auto")
@@ -133,6 +139,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--height", type=int, default=720, help="Frame height")
     parser.add_argument("--fps", type=int, default=30, help="Frame rate")
     parser.add_argument("--detect-every", type=int, default=2, help="Run heavy face detection every N frames")
+    parser.add_argument("--beauty-strength", type=float, default=0.45, help="Beauty filter strength")
     parser.add_argument("--mirror", action="store_true", help="Mirror the camera image")
     parser.add_argument("--max-faces", type=int, default=1, help="Maximum faces to render with avatar")
     parser.add_argument("--avatar-scale", type=float, default=1.0, help="Scale multiplier for avatar size")
@@ -2254,6 +2261,46 @@ def composite_avatar(
     return overlay_rgba(frame, canvas, out_x, out_y, canvas_w, canvas_h)
 
 
+def beautify_with_face(frame: np.ndarray, face: Tuple[int, int, int, int], strength: float) -> np.ndarray:
+    x, y, w, h = face
+    frame_h, frame_w = frame.shape[:2]
+
+    pad_x = int(w * 0.28)
+    pad_y = int(h * 0.34)
+    x1 = max(0, x - pad_x)
+    y1 = max(0, y - pad_y)
+    x2 = min(frame_w, x + w + pad_x)
+    y2 = min(frame_h, y + h + pad_y)
+    if x2 - x1 < 8 or y2 - y1 < 8:
+        return frame
+
+    roi = frame[y1:y2, x1:x2].copy()
+    smoothed = cv2.bilateralFilter(roi, d=7, sigmaColor=40, sigmaSpace=40)
+    enhanced = cv2.addWeighted(roi, 1.18, smoothed, -0.18, 0)
+
+    roi_h, roi_w = roi.shape[:2]
+    mask = np.zeros((roi_h, roi_w), dtype=np.uint8)
+    local_cx = int((x + w * 0.5) - x1)
+    local_cy = int((y + h * 0.48) - y1)
+    rx = max(8, int(w * 0.60))
+    ry = max(10, int(h * 0.80))
+    cv2.ellipse(mask, (local_cx, local_cy), (rx, ry), 0, 0, 360, 255, -1)
+    mask = cv2.GaussianBlur(mask, (0, 0), max(2.0, h * 0.14))
+
+    alpha = (mask.astype(np.float32) / 255.0)[:, :, None] * float(np.clip(strength, 0.0, 1.0))
+    blended = roi.astype(np.float32) * (1.0 - alpha) + enhanced.astype(np.float32) * alpha
+
+    ycrcb = cv2.cvtColor(np.clip(blended, 0, 255).astype(np.uint8), cv2.COLOR_BGR2YCrCb)
+    y_channel = ycrcb[:, :, 0].astype(np.float32)
+    y_channel = np.clip(y_channel + 8.0 * alpha[:, :, 0], 0, 255)
+    ycrcb[:, :, 0] = y_channel.astype(np.uint8)
+    out_roi = cv2.cvtColor(ycrcb, cv2.COLOR_YCrCb2BGR)
+
+    result = frame.copy()
+    result[y1:y2, x1:x2] = out_roi
+    return result
+
+
 def process_frame(
     frame: np.ndarray,
     avatar: Optional[np.ndarray],
@@ -2261,6 +2308,8 @@ def process_frame(
     eye_cascade: cv2.CascadeClassifier,
     mouth_cascade: cv2.CascadeClassifier,
     profile_cascade: Optional[cv2.CascadeClassifier],
+    render_mode: str,
+    beauty_strength: float,
     fallback_style: str,
     background_mode: str,
     avatar_scale: float,
@@ -2274,15 +2323,34 @@ def process_frame(
     global FRAME_COUNTER
     FRAME_COUNTER += 1
 
+    detect_stride = max(1, int(detect_every))
+    must_detect = TRACKING_STATE.face is None or (FRAME_COUNTER % detect_stride == 0)
+    now = time.monotonic()
+
+    if render_mode == "beauty":
+        state = estimate_pose(frame, face_cascade, eye_cascade, mouth_cascade, profile_cascade) if must_detect else None
+        if state is not None:
+            state = update_tracking(state, now)
+            return beautify_with_face(frame, state.face, beauty_strength)
+
+        if TRACKING_STATE.face is not None and (now - TRACKING_STATE.last_face_at) <= 0.32:
+            smoothed_face = TRACKING_STATE.face
+            tracked_face = (
+                int(smoothed_face[0]),
+                int(smoothed_face[1]),
+                int(smoothed_face[2]),
+                int(smoothed_face[3]),
+            )
+            return beautify_with_face(frame, tracked_face, beauty_strength * 0.9)
+
+        return frame
+
     if avatar is None:
         if fallback_style == "normal":
             return frame
         return cartoonize(frame)
 
     faces_multi: list[Tuple[int, int, int, int]] = []
-    detect_stride = max(1, int(detect_every))
-    must_detect = TRACKING_STATE.face is None or (FRAME_COUNTER % detect_stride == 0)
-    now = time.monotonic()
 
     if max_faces > 1 and must_detect:
         faces_multi = detect_faces_multi(frame, face_cascade, profile_cascade, eye_cascade, max_faces=max_faces)
@@ -2391,6 +2459,7 @@ def main() -> int:
     writer, output_spec, output_desc = create_output_writer(args, spec)
 
     print(f"camera={args.camera}")
+    print(f"render_mode={args.render_mode}")
     print(f"output_mode={args.output_mode}")
     print(f"output={output_desc}")
     print(f"build_tag={BUILD_TAG}")
@@ -2403,6 +2472,7 @@ def main() -> int:
     print(f"mouth_animation={args.mouth_animation}")
     print(f"mouth_y_offset={args.mouth_y_offset}")
     print(f"mouth_x_offset={args.mouth_x_offset}")
+    print(f"beauty_strength={args.beauty_strength}")
     print(f"max_faces={max(1, int(args.max_faces))}")
     print(f"detect_every={max(1, int(args.detect_every))}")
     print(f"fallback_style={args.fallback_style}")
@@ -2433,6 +2503,8 @@ def main() -> int:
                 eye_cascade,
                 mouth_cascade,
                 profile_cascade,
+                args.render_mode,
+                args.beauty_strength,
                 args.fallback_style,
                 args.background_mode,
                 args.avatar_scale,

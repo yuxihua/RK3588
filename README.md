@@ -93,6 +93,8 @@ GPIO 选择头像（GPIO0/GPIO1 两位共四种）：
 - 默认头像（兜底）：`/opt/rk3588-avatar-gateway/assets/avatar.png`
 - 可选头像目录：`/opt/rk3588-avatar-gateway/assets/avatars`
 - 输出背景模式：默认 `camera`（使用摄像头真实背景）
+- 渲染模式：默认 `RENDER_MODE=beauty`（可选 `beauty` 或 `avatar`）
+- 美颜强度：默认 `BEAUTY_STRENGTH=0.45`
 - 头像缩放参数：`AVATAR_SCALE=1.0`（可调）
 - GPIO 选头像：默认关闭（`GPIO_AVATAR_SELECT=0`）
 - 眼睛动画：默认 `subtle`

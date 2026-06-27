@@ -72,6 +72,7 @@ AVATAR_GPIO_00=avatar_00
 AVATAR_GPIO_01=avatar_01
 AVATAR_GPIO_10=avatar_10
 AVATAR_GPIO_11=avatar_11
+RENDER_MODE=beauty
 OUTPUT_MODE=network
 OUTPUT_DEVICE=/dev/video43
 NETWORK_HOST=0.0.0.0
@@ -87,6 +88,7 @@ MOUTH_Y_OFFSET=0.00
 MOUTH_X_OFFSET=0.00
 MAX_FACES=1
 DETECT_EVERY=2
+BEAUTY_STRENGTH=0.45
 WIDTH=960
 HEIGHT=540
 FPS=15
@@ -95,6 +97,9 @@ fi
 
 if ! grep -q '^OUTPUT_MODE=' "$ENV_FILE"; then
   echo 'OUTPUT_MODE=network' >> "$ENV_FILE"
+fi
+if ! grep -q '^RENDER_MODE=' "$ENV_FILE"; then
+  echo 'RENDER_MODE=beauty' >> "$ENV_FILE"
 fi
 if ! grep -q '^OUTPUT_DEVICE=' "$ENV_FILE"; then
   echo 'OUTPUT_DEVICE=/dev/video43' >> "$ENV_FILE"
@@ -137,6 +142,9 @@ if ! grep -q '^MAX_FACES=' "$ENV_FILE"; then
 fi
 if ! grep -q '^DETECT_EVERY=' "$ENV_FILE"; then
   echo 'DETECT_EVERY=2' >> "$ENV_FILE"
+fi
+if ! grep -q '^BEAUTY_STRENGTH=' "$ENV_FILE"; then
+  echo 'BEAUTY_STRENGTH=0.45' >> "$ENV_FILE"
 fi
 if ! grep -q '^WIDTH=' "$ENV_FILE"; then
   echo 'WIDTH=960' >> "$ENV_FILE"
@@ -204,6 +212,7 @@ Environment=AVATAR_GPIO_00=avatar_00
 Environment=AVATAR_GPIO_01=avatar_01
 Environment=AVATAR_GPIO_10=avatar_10
 Environment=AVATAR_GPIO_11=avatar_11
+Environment=RENDER_MODE=beauty
 Environment=OUTPUT_MODE=network
 Environment=OUTPUT_DEVICE=/dev/video43
 Environment=NETWORK_HOST=0.0.0.0
@@ -219,6 +228,7 @@ Environment=MOUTH_Y_OFFSET=0.00
 Environment=MOUTH_X_OFFSET=0.00
 Environment=MAX_FACES=1
 Environment=DETECT_EVERY=2
+Environment=BEAUTY_STRENGTH=0.45
 Environment=WIDTH=960
 Environment=HEIGHT=540
 Environment=FPS=15
