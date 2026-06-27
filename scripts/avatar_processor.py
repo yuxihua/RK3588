@@ -1759,6 +1759,25 @@ def crop_avatar_near_face(
     return cropped, (ax - x1, ay - y1, aw, ah)
 
 
+def crop_avatar_face_region(
+    avatar: np.ndarray,
+    face_box: Tuple[int, int, int, int],
+) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
+    ax, ay, aw, ah = face_box
+    h, w = avatar.shape[:2]
+
+    x1 = max(0, int(ax - 0.55 * aw))
+    x2 = min(w, int(ax + aw + 0.55 * aw))
+    y1 = max(0, int(ay - 0.35 * ah))
+    y2 = min(h, int(ay + ah + 0.45 * ah))
+
+    if x2 - x1 < 8 or y2 - y1 < 8:
+        return avatar, face_box
+
+    cropped = avatar[y1:y2, x1:x2].copy()
+    return cropped, (ax - x1, ay - y1, aw, ah)
+
+
 def choose_eye_pair(eyes: np.ndarray) -> Optional[Tuple[Tuple[int, int], Tuple[int, int]]]:
     if len(eyes) < 2:
         return None
@@ -1938,6 +1957,69 @@ def _default_idle_face(frame: np.ndarray) -> FaceState:
     return FaceState(face=(face_x, face_y, face_w, face_h), angle=0.0, mouth_open=0.0, eye_open=0.95)
 
 
+def composite_avatar_face_swap(
+    frame: np.ndarray,
+    avatar: np.ndarray,
+    state: FaceState,
+    avatar_face_box: Optional[Tuple[int, int, int, int]] = None,
+    avatar_scale: float = 1.0,
+    eye_animation: str = "off",
+    mouth_animation: str = "off",
+    replace_background: bool = False,
+) -> np.ndarray:
+    x, y, w, h = state.face
+    face_center_x = x + w / 2.0
+    face_center_y = y + h * 0.42
+
+    source_avatar = avatar
+    source_face_box = avatar_face_box
+    if source_face_box is not None:
+        source_avatar, source_face_box = crop_avatar_face_region(source_avatar, source_face_box)
+
+    scale_mul = float(np.clip(avatar_scale, 0.6, 3.0))
+
+    if source_face_box is not None:
+        _, _, sfw, _ = source_face_box
+        target_face_w = max(40, int(w * 1.30 * scale_mul))
+        scale = target_face_w / max(1.0, float(sfw))
+        patch_w = max(48, int(source_avatar.shape[1] * scale))
+        patch_h = max(48, int(source_avatar.shape[0] * scale))
+    else:
+        patch_w = int(w * 1.30 * scale_mul)
+        patch_h = int(h * (1.10 * scale_mul))
+
+    resized_avatar = cv2.resize(source_avatar, (patch_w, patch_h), interpolation=cv2.INTER_AREA)
+    blink_level = max(TRACKING_STATE.blink_progress, 1.0 - state.eye_open)
+    animated_avatar = animate_avatar_features(
+        resized_avatar,
+        blink_level,
+        state.mouth_open,
+        eye_animation,
+        mouth_animation,
+    )
+
+    canvas = np.zeros((animated_avatar.shape[0], animated_avatar.shape[1], 4), dtype=np.uint8)
+    canvas = overlay_rgba(canvas, animated_avatar, 0, 0, patch_w, patch_h)
+
+    if source_face_box is not None:
+        sfx, sfy, sfw, sfh = source_face_box
+        scale_x = patch_w / max(1.0, float(source_avatar.shape[1]))
+        scale_y = patch_h / max(1.0, float(source_avatar.shape[0]))
+        avatar_face_cx = (sfx + sfw * 0.50) * scale_x
+        avatar_face_cy = (sfy + sfh * 0.50) * scale_y
+        out_x = int(face_center_x - avatar_face_cx)
+        out_y = int(face_center_y - avatar_face_cy)
+    else:
+        out_x = int(face_center_x - patch_w / 2.0)
+        out_y = int(face_center_y - patch_h * 0.45)
+
+    base_frame = frame
+    if replace_background:
+        base_frame = get_static_stage_bgr(frame.shape[1], frame.shape[0])
+
+    return overlay_rgba(base_frame, canvas, out_x, out_y, patch_w, patch_h)
+
+
 def composite_avatar(
     frame: np.ndarray,
     avatar: np.ndarray,
@@ -2037,10 +2119,7 @@ def process_frame(
         if state is not None:
             state = update_tracking(state)
 
-        if background_mode != "camera":
-            output_frame = get_static_stage_bgr(frame.shape[1], frame.shape[0]).copy()
-        else:
-            output_frame = frame.copy()
+        output_frame = frame.copy()
 
         for idx, face in enumerate(faces_multi):
             if idx == 0 and state is not None:
@@ -2055,12 +2134,11 @@ def process_frame(
                 face_state = FaceState(face=face, angle=0.0, mouth_open=0.0, eye_open=1.0)
                 local_mouth_animation = "off"
 
-            output_frame = composite_avatar(
+            output_frame = composite_avatar_face_swap(
                 output_frame,
                 avatar,
                 face_state,
-                now,
-                replace_background=False,
+                replace_background=(background_mode != "camera"),
                 avatar_face_box=avatar_face_box,
                 avatar_scale=avatar_scale,
                 eye_animation=eye_animation,
@@ -2089,11 +2167,10 @@ def process_frame(
             state = _default_idle_face(frame)
 
     update_blink_state(state, now)
-    return composite_avatar(
+    return composite_avatar_face_swap(
         frame,
         avatar,
         state,
-        now,
         replace_background=(background_mode != "camera"),
         avatar_face_box=avatar_face_box,
         avatar_scale=avatar_scale,
