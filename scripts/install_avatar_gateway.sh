@@ -86,7 +86,7 @@ MOUTH_ANIMATION=off
 MAX_FACES=1
 WIDTH=1280
 HEIGHT=720
-FPS=20
+FPS=15
 EOF
 fi
 
@@ -133,7 +133,7 @@ if ! grep -q '^HEIGHT=' "$ENV_FILE"; then
   echo 'HEIGHT=720' >> "$ENV_FILE"
 fi
 if ! grep -q '^FPS=' "$ENV_FILE"; then
-  echo 'FPS=20' >> "$ENV_FILE"
+  echo 'FPS=15' >> "$ENV_FILE"
 fi
 
 # Migrate legacy defaults from older installs so virtual avatar works out-of-box.
@@ -156,7 +156,10 @@ if grep -q '^FPS=15$' "$ENV_FILE"; then
   sed -i 's/^FPS=15$/FPS=20/' "$ENV_FILE"
 fi
 if grep -q '^FPS=30$' "$ENV_FILE"; then
-  sed -i 's/^FPS=30$/FPS=20/' "$ENV_FILE"
+  sed -i 's/^FPS=30$/FPS=15/' "$ENV_FILE"
+fi
+if grep -q '^FPS=20$' "$ENV_FILE"; then
+  sed -i 's/^FPS=20$/FPS=15/' "$ENV_FILE"
 fi
 
 cat > "$SERVICE_FILE" <<EOF
@@ -191,7 +194,7 @@ Environment=MOUTH_ANIMATION=off
 Environment=MAX_FACES=1
 Environment=WIDTH=1280
 Environment=HEIGHT=720
-Environment=FPS=20
+Environment=FPS=15
 ExecStart=$INSTALL_ROOT/scripts/run_avatar_gateway.sh
 Restart=always
 RestartSec=1
