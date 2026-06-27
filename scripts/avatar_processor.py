@@ -1676,54 +1676,22 @@ def composite_avatar(frame: np.ndarray, avatar: np.ndarray, state: FaceState, no
     x, y, w, h = state.face
     face_center_x = x + w / 2.0
     face_center_y = y + h * 0.40
-    phase = 0.0
-    sway = 0.0
 
     head_w = int(w * 2.10)
     head_h = int(h * (2.25 + state.mouth_open * 0.10))
-    body_h = int(h * 2.70)
-    body_w = int(head_w * 1.10)
-    canvas_h = body_h + int(h * 0.20)
-    canvas_w = max(head_w, body_w)
-
-    canvas = create_stage_background(canvas_w, canvas_h, phase)
-    canvas = add_vignette(canvas)
-    canvas = add_grid_overlay(canvas, phase)
-    canvas = add_side_panels(canvas, phase)
-    canvas = add_frame_accents(canvas, phase)
-    canvas = add_bottom_band(canvas, phase)
-    canvas = apply_cyber_grade(canvas, phase)
 
     resized_avatar = cv2.resize(avatar, (head_w, head_h), interpolation=cv2.INTER_AREA)
     blink_level = max(TRACKING_STATE.blink_progress, 1.0 - state.eye_open)
     animated_avatar = animate_avatar_features(resized_avatar, blink_level, state.mouth_open)
     rotated_avatar = rotate_rgba(animated_avatar, -state.angle * 1.35)
 
-    head_x = int((canvas_w - rotated_avatar.shape[1]) / 2.0)
-    head_y = int(h * 0.02)
-    if state.mouth_open > 0.25:
-        head_y += int((state.mouth_open - 0.25) * h * 0.10)
-    head_x += int(sway)
-
-    canvas = overlay_rgba(canvas, rotated_avatar, head_x, head_y, rotated_avatar.shape[1], rotated_avatar.shape[0])
-
-    body_x = int((canvas_w - body_w) / 2.0)
-    body_y = int(head_h * 0.64)
-    body_x += int(sway * 0.55)
-    body_layer = create_body_canvas(body_w, body_h, head_h, 0.0)
-    canvas = overlay_rgba(canvas, body_layer, body_x, body_y, body_w, body_h)
-
-    outline = np.zeros_like(canvas)
-    cv2.rectangle(outline, (body_x, body_y), (body_x + body_w, body_y + body_h), (255, 255, 255, 18), 4)
-    cv2.line(outline, (0, body_y), (canvas_w, body_y), (95, 235, 186, 16), 2)
-    cv2.line(outline, (0, body_y + body_h + 10), (canvas_w, body_y + body_h + 10), (88, 178, 255, 18), 2)
-    outline = cv2.GaussianBlur(outline, (0, 0), 8)
-    canvas[:, :, :3] = np.maximum(canvas[:, :, :3], outline[:, :, :3])
-
-    canvas = add_lower_third(canvas, 0.0)
+    canvas_h = rotated_avatar.shape[0]
+    canvas_w = rotated_avatar.shape[1]
+    canvas = np.zeros((canvas_h, canvas_w, 4), dtype=np.uint8)
+    canvas = overlay_rgba(canvas, rotated_avatar, 0, 0, canvas_w, canvas_h)
 
     out_x = int(face_center_x - canvas_w / 2.0)
-    out_y = int(face_center_y - head_h * 0.54)
+    out_y = int(face_center_y - canvas_h * 0.45)
 
     if replace_background:
         stage_bgr = get_static_stage_bgr(frame.shape[1], frame.shape[0])
