@@ -133,6 +133,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mirror", action="store_true", help="Mirror the camera image")
     parser.add_argument("--avatar-scale", type=float, default=1.0, help="Scale multiplier for avatar size")
     parser.add_argument(
+        "--eye-animation",
+        choices=["off", "subtle", "normal"],
+        default="off",
+        help="Eye animation strength for avatar",
+    )
+    parser.add_argument(
         "--mouth-animation",
         choices=["off", "subtle", "normal"],
         default="off",
@@ -1452,6 +1458,7 @@ def animate_avatar_features(
     avatar_rgba: np.ndarray,
     blink_progress: float,
     mouth_open: float,
+    eye_animation: str = "off",
     mouth_animation: str = "off",
 ) -> np.ndarray:
     if avatar_rgba.ndim != 3 or avatar_rgba.shape[2] != 4:
@@ -1459,7 +1466,13 @@ def animate_avatar_features(
 
     animated = avatar_rgba.copy()
     h, w = animated.shape[:2]
-    blink = float(np.clip(blink_progress, 0.0, 1.0))
+    blink_raw = float(np.clip(blink_progress, 0.0, 1.0))
+    if eye_animation == "off":
+        blink = 0.0
+    elif eye_animation == "subtle":
+        blink = float(np.clip(blink_raw * 0.45, 0.0, 0.45))
+    else:
+        blink = blink_raw
     mouth_raw = float(np.clip(mouth_open, 0.0, 1.0))
     if mouth_animation == "off":
         mouth = 0.0
@@ -1804,6 +1817,7 @@ def composite_avatar(
     replace_background: bool = True,
     avatar_face_box: Optional[Tuple[int, int, int, int]] = None,
     avatar_scale: float = 1.0,
+    eye_animation: str = "off",
     mouth_animation: str = "off",
 ) -> np.ndarray:
     x, y, w, h = state.face
@@ -1834,6 +1848,7 @@ def composite_avatar(
         resized_avatar,
         blink_level,
         state.mouth_open,
+        eye_animation,
         mouth_animation,
     )
     # Keep alignment stable: avoid adding rotation offset when fitting face-to-face.
@@ -1873,6 +1888,7 @@ def process_frame(
     fallback_style: str,
     background_mode: str,
     avatar_scale: float,
+    eye_animation: str,
     mouth_animation: str,
 ) -> np.ndarray:
     if avatar is None:
@@ -1915,6 +1931,7 @@ def process_frame(
                 replace_background=False,
                 avatar_face_box=avatar_face_box,
                 avatar_scale=avatar_scale,
+                eye_animation=eye_animation,
                 mouth_animation=local_mouth_animation,
             )
 
@@ -1948,6 +1965,7 @@ def process_frame(
         replace_background=(background_mode != "camera"),
         avatar_face_box=avatar_face_box,
         avatar_scale=avatar_scale,
+        eye_animation=eye_animation,
         mouth_animation=mouth_animation,
     )
 
@@ -1993,6 +2011,7 @@ def main() -> int:
     print(f"avatar={'yes' if avatar is not None else 'no'}")
     print(f"avatar_path={avatar_path or 'none'}")
     print(f"avatar_scale={args.avatar_scale}")
+    print(f"eye_animation={args.eye_animation}")
     print(f"mouth_animation={args.mouth_animation}")
     print(f"fallback_style={args.fallback_style}")
     print(f"background_mode={args.background_mode}")
@@ -2025,6 +2044,7 @@ def main() -> int:
                 args.fallback_style,
                 args.background_mode,
                 args.avatar_scale,
+                args.eye_animation,
                 args.mouth_animation,
             )
             if output_frame.shape[1] != output_spec.width or output_frame.shape[0] != output_spec.height:

@@ -81,6 +81,7 @@ NETWORK_JPEG_QUALITY=85
 FALLBACK_STYLE=cartoon
 BACKGROUND_MODE=camera
 AVATAR_SCALE=1.0
+EYE_ANIMATION=off
 MOUTH_ANIMATION=off
 EOF
 fi
@@ -111,6 +112,9 @@ if ! grep -q '^BACKGROUND_MODE=' "$ENV_FILE"; then
 fi
 if ! grep -q '^AVATAR_SCALE=' "$ENV_FILE"; then
   echo 'AVATAR_SCALE=1.0' >> "$ENV_FILE"
+fi
+if ! grep -q '^EYE_ANIMATION=' "$ENV_FILE"; then
+  echo 'EYE_ANIMATION=off' >> "$ENV_FILE"
 fi
 if ! grep -q '^MOUTH_ANIMATION=' "$ENV_FILE"; then
   echo 'MOUTH_ANIMATION=off' >> "$ENV_FILE"
@@ -154,6 +158,7 @@ Environment=NETWORK_JPEG_QUALITY=85
 Environment=FALLBACK_STYLE=normal
 Environment=BACKGROUND_MODE=camera
 Environment=AVATAR_SCALE=1.0
+Environment=EYE_ANIMATION=off
 Environment=MOUTH_ANIMATION=off
 ExecStart=$INSTALL_ROOT/scripts/run_avatar_gateway.sh
 Restart=always
