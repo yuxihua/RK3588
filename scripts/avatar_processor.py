@@ -52,6 +52,7 @@ STOP_REQUESTED = False
 TRACKING_STATE = TrackingState()
 BUILD_TAG = "2026-06-26-uvc-probe-v2"
 STATIC_STAGE_CACHE: Dict[Tuple[int, int], np.ndarray] = {}
+AVATAR_FACE_BOX_CACHE: Dict[int, Optional[Tuple[int, int, int, int]]] = {}
 random.seed()
 
 
@@ -1565,6 +1566,69 @@ def detect_face(
     return tuple(int(value) for value in candidates[0])
 
 
+def detect_avatar_face_box(
+    avatar: np.ndarray,
+    face_cascade: cv2.CascadeClassifier,
+    profile_cascade: Optional[cv2.CascadeClassifier] = None,
+) -> Optional[Tuple[int, int, int, int]]:
+    cache_key = id(avatar)
+    if cache_key in AVATAR_FACE_BOX_CACHE:
+        return AVATAR_FACE_BOX_CACHE[cache_key]
+
+    if avatar.ndim != 3 or avatar.shape[2] < 3:
+        AVATAR_FACE_BOX_CACHE[cache_key] = None
+        return None
+
+    bgr = avatar[:, :, :3]
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape[:2]
+    min_side = max(24, min(h, w) // 10)
+
+    candidates = []
+    frontal_faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(min_side, min_side))
+    for face in frontal_faces:
+        candidates.append(tuple(int(value) for value in face))
+
+    if profile_cascade is not None:
+        profile_left = profile_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(min_side, min_side))
+        for face in profile_left:
+            candidates.append(tuple(int(value) for value in face))
+
+        gray_flipped = cv2.flip(gray, 1)
+        profile_right = profile_cascade.detectMultiScale(gray_flipped, scaleFactor=1.1, minNeighbors=4, minSize=(min_side, min_side))
+        for face in profile_right:
+            x, y, fw, fh = (int(value) for value in face)
+            mirrored_x = w - (x + fw)
+            candidates.append((mirrored_x, y, fw, fh))
+
+    if len(candidates) == 0:
+        AVATAR_FACE_BOX_CACHE[cache_key] = None
+        return None
+
+    candidates = sorted(candidates, key=lambda item: item[2] * item[3], reverse=True)
+    AVATAR_FACE_BOX_CACHE[cache_key] = tuple(int(value) for value in candidates[0])
+    return AVATAR_FACE_BOX_CACHE[cache_key]
+
+
+def crop_avatar_near_face(
+    avatar: np.ndarray,
+    face_box: Tuple[int, int, int, int],
+) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
+    ax, ay, aw, ah = face_box
+    h, w = avatar.shape[:2]
+
+    x1 = max(0, int(ax - 0.9 * aw))
+    x2 = min(w, int(ax + 1.9 * aw))
+    y1 = max(0, int(ay - 0.55 * ah))
+    y2 = min(h, int(ay + 2.5 * ah))
+
+    if x2 - x1 < 8 or y2 - y1 < 8:
+        return avatar, face_box
+
+    cropped = avatar[y1:y2, x1:x2].copy()
+    return cropped, (ax - x1, ay - y1, aw, ah)
+
+
 def choose_eye_pair(eyes: np.ndarray) -> Optional[Tuple[Tuple[int, int], Tuple[int, int]]]:
     if len(eyes) < 2:
         return None
@@ -1703,26 +1767,55 @@ def _default_idle_face(frame: np.ndarray) -> FaceState:
     return FaceState(face=(face_x, face_y, face_w, face_h), angle=0.0, mouth_open=0.0, eye_open=0.95)
 
 
-def composite_avatar(frame: np.ndarray, avatar: np.ndarray, state: FaceState, now: float, replace_background: bool = True) -> np.ndarray:
+def composite_avatar(
+    frame: np.ndarray,
+    avatar: np.ndarray,
+    state: FaceState,
+    now: float,
+    replace_background: bool = True,
+    avatar_face_box: Optional[Tuple[int, int, int, int]] = None,
+) -> np.ndarray:
     x, y, w, h = state.face
     face_center_x = x + w / 2.0
     face_center_y = y + h * 0.40
 
-    head_w = int(w * 2.10)
-    head_h = int(h * (2.25 + state.mouth_open * 0.10))
+    source_avatar = avatar
+    source_face_box = avatar_face_box
+    if source_face_box is not None:
+        source_avatar, source_face_box = crop_avatar_near_face(source_avatar, source_face_box)
 
-    resized_avatar = cv2.resize(avatar, (head_w, head_h), interpolation=cv2.INTER_AREA)
+    if source_face_box is not None:
+        _, _, sfw, _ = source_face_box
+        target_face_w = max(32, int(w * 1.35))
+        scale = target_face_w / max(1.0, float(sfw))
+        head_w = max(48, int(source_avatar.shape[1] * scale))
+        head_h = max(48, int(source_avatar.shape[0] * scale))
+    else:
+        head_w = int(w * 1.65)
+        head_h = int(h * (1.95 + state.mouth_open * 0.08))
+
+    resized_avatar = cv2.resize(source_avatar, (head_w, head_h), interpolation=cv2.INTER_AREA)
     blink_level = max(TRACKING_STATE.blink_progress, 1.0 - state.eye_open)
     animated_avatar = animate_avatar_features(resized_avatar, blink_level, state.mouth_open)
-    rotated_avatar = rotate_rgba(animated_avatar, -state.angle * 1.35)
+    # Keep alignment stable: avoid adding rotation offset when fitting face-to-face.
+    rotated_avatar = animated_avatar
 
     canvas_h = rotated_avatar.shape[0]
     canvas_w = rotated_avatar.shape[1]
     canvas = np.zeros((canvas_h, canvas_w, 4), dtype=np.uint8)
     canvas = overlay_rgba(canvas, rotated_avatar, 0, 0, canvas_w, canvas_h)
 
-    out_x = int(face_center_x - canvas_w / 2.0)
-    out_y = int(face_center_y - canvas_h * 0.45)
+    if source_face_box is not None:
+        sfx, sfy, sfw, sfh = source_face_box
+        scale_x = head_w / max(1.0, float(source_avatar.shape[1]))
+        scale_y = head_h / max(1.0, float(source_avatar.shape[0]))
+        avatar_face_cx = (sfx + sfw * 0.50) * scale_x
+        avatar_face_cy = (sfy + sfh * 0.45) * scale_y
+        out_x = int(face_center_x - avatar_face_cx)
+        out_y = int(face_center_y - avatar_face_cy)
+    else:
+        out_x = int(face_center_x - canvas_w / 2.0)
+        out_y = int(face_center_y - canvas_h * 0.45)
 
     if replace_background:
         stage_bgr = get_static_stage_bgr(frame.shape[1], frame.shape[0])
@@ -1748,6 +1841,7 @@ def process_frame(
 
     state = estimate_pose(frame, face_cascade, eye_cascade, mouth_cascade, profile_cascade)
     now = time.monotonic()
+    avatar_face_box = detect_avatar_face_box(avatar, face_cascade, profile_cascade)
 
     if state is not None:
         state = update_tracking(state)
@@ -1769,7 +1863,14 @@ def process_frame(
             state = _default_idle_face(frame)
 
     update_blink_state(state, now)
-    return composite_avatar(frame, avatar, state, now, replace_background=(background_mode != "camera"))
+    return composite_avatar(
+        frame,
+        avatar,
+        state,
+        now,
+        replace_background=(background_mode != "camera"),
+        avatar_face_box=avatar_face_box,
+    )
 
 
 def main() -> int:
