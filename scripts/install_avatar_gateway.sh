@@ -77,7 +77,7 @@ OUTPUT_DEVICE=/dev/video43
 NETWORK_HOST=0.0.0.0
 NETWORK_PORT=8080
 NETWORK_PATH=/mjpeg
-NETWORK_JPEG_QUALITY=85
+NETWORK_JPEG_QUALITY=70
 FALLBACK_STYLE=cartoon
 BACKGROUND_MODE=camera
 AVATAR_SCALE=1.0
@@ -106,7 +106,7 @@ if ! grep -q '^NETWORK_PATH=' "$ENV_FILE"; then
   echo 'NETWORK_PATH=/mjpeg' >> "$ENV_FILE"
 fi
 if ! grep -q '^NETWORK_JPEG_QUALITY=' "$ENV_FILE"; then
-  echo 'NETWORK_JPEG_QUALITY=85' >> "$ENV_FILE"
+  echo 'NETWORK_JPEG_QUALITY=70' >> "$ENV_FILE"
 fi
 if ! grep -q '^FALLBACK_STYLE=' "$ENV_FILE"; then
   echo 'FALLBACK_STYLE=normal' >> "$ENV_FILE"
@@ -152,9 +152,6 @@ fi
 if grep -q '^HEIGHT=360$' "$ENV_FILE"; then
   sed -i 's/^HEIGHT=360$/HEIGHT=720/' "$ENV_FILE"
 fi
-if grep -q '^FPS=15$' "$ENV_FILE"; then
-  sed -i 's/^FPS=15$/FPS=20/' "$ENV_FILE"
-fi
 if grep -q '^FPS=30$' "$ENV_FILE"; then
   sed -i 's/^FPS=30$/FPS=15/' "$ENV_FILE"
 fi
@@ -185,7 +182,7 @@ Environment=OUTPUT_DEVICE=/dev/video43
 Environment=NETWORK_HOST=0.0.0.0
 Environment=NETWORK_PORT=8080
 Environment=NETWORK_PATH=/mjpeg
-Environment=NETWORK_JPEG_QUALITY=85
+Environment=NETWORK_JPEG_QUALITY=70
 Environment=FALLBACK_STYLE=normal
 Environment=BACKGROUND_MODE=camera
 Environment=AVATAR_SCALE=1.0

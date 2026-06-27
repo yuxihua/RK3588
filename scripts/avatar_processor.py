@@ -1565,30 +1565,50 @@ def cartoonize(frame: np.ndarray) -> np.ndarray:
     return cv2.bitwise_and(color, edges)
 
 
+def _prepare_detection_gray(frame: np.ndarray, target_width: int = 640) -> Tuple[np.ndarray, float]:
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape[:2]
+    if w <= target_width:
+        return gray, 1.0
+
+    scale = float(target_width) / float(max(1, w))
+    resized = cv2.resize(gray, (max(1, int(w * scale)), max(1, int(h * scale))), interpolation=cv2.INTER_LINEAR)
+    return resized, scale
+
+
+def _rescale_box(box: Tuple[int, int, int, int], scale: float) -> Tuple[int, int, int, int]:
+    if scale >= 0.999:
+        return box
+    inv = 1.0 / max(scale, 1e-6)
+    x, y, w, h = box
+    return int(x * inv), int(y * inv), int(w * inv), int(h * inv)
+
+
 def detect_face(
     frame: np.ndarray,
     cascade: cv2.CascadeClassifier,
     profile_cascade: Optional[cv2.CascadeClassifier] = None,
 ) -> Optional[Tuple[int, int, int, int]]:
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray, scale = _prepare_detection_gray(frame)
     candidates = []
+    min_side = max(36, int(72 * scale))
 
-    frontal_faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(72, 72))
+    frontal_faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(min_side, min_side))
     for face in frontal_faces:
-        candidates.append(tuple(int(value) for value in face))
+        candidates.append(_rescale_box(tuple(int(value) for value in face), scale))
 
     if profile_cascade is not None:
-        profile_left = profile_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(72, 72))
+        profile_left = profile_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(min_side, min_side))
         for face in profile_left:
-            candidates.append(tuple(int(value) for value in face))
+            candidates.append(_rescale_box(tuple(int(value) for value in face), scale))
 
         gray_flipped = cv2.flip(gray, 1)
-        profile_right = profile_cascade.detectMultiScale(gray_flipped, scaleFactor=1.1, minNeighbors=4, minSize=(72, 72))
+        profile_right = profile_cascade.detectMultiScale(gray_flipped, scaleFactor=1.1, minNeighbors=4, minSize=(min_side, min_side))
         frame_w = gray.shape[1]
         for face in profile_right:
             x, y, w, h = (int(value) for value in face)
             mirrored_x = frame_w - (x + w)
-            candidates.append((mirrored_x, y, w, h))
+            candidates.append(_rescale_box((mirrored_x, y, w, h), scale))
 
     if len(candidates) == 0:
         return None
@@ -1632,24 +1652,25 @@ def detect_faces_multi(
     eye_cascade: cv2.CascadeClassifier,
     max_faces: int = 2,
 ) -> list[Tuple[int, int, int, int]]:
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray, scale = _prepare_detection_gray(frame)
     candidates: list[Tuple[int, int, int, int]] = []
+    min_side = max(32, int(64 * scale))
 
-    frontal = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(64, 64))
+    frontal = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(min_side, min_side))
     for face in frontal:
-        candidates.append(tuple(int(v) for v in face))
+        candidates.append(_rescale_box(tuple(int(v) for v in face), scale))
 
     if profile_cascade is not None:
-        left = profile_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(64, 64))
+        left = profile_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(min_side, min_side))
         for face in left:
-            candidates.append(tuple(int(v) for v in face))
+            candidates.append(_rescale_box(tuple(int(v) for v in face), scale))
 
         flipped = cv2.flip(gray, 1)
-        right = profile_cascade.detectMultiScale(flipped, scaleFactor=1.1, minNeighbors=3, minSize=(64, 64))
+        right = profile_cascade.detectMultiScale(flipped, scaleFactor=1.1, minNeighbors=3, minSize=(min_side, min_side))
         frame_w = gray.shape[1]
         for face in right:
             x, y, w, h = (int(v) for v in face)
-            candidates.append((frame_w - (x + w), y, w, h))
+            candidates.append(_rescale_box((frame_w - (x + w), y, w, h), scale))
 
     eye_face = infer_face_from_eyes(frame, eye_cascade)
     if eye_face is not None:
@@ -1757,13 +1778,20 @@ def choose_eye_pair(eyes: np.ndarray) -> Optional[Tuple[Tuple[int, int], Tuple[i
 
 
 def infer_face_from_eyes(frame: np.ndarray, eye_cascade: cv2.CascadeClassifier) -> Optional[Tuple[int, int, int, int]]:
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray, scale = _prepare_detection_gray(frame)
+    min_eye_w = max(10, int(18 * scale))
+    min_eye_h = max(8, int(12 * scale))
     eyes = eye_cascade.detectMultiScale(
         gray,
         scaleFactor=1.08,
         minNeighbors=3,
-        minSize=(18, 12),
+        minSize=(min_eye_w, min_eye_h),
     )
+    if scale < 0.999 and len(eyes) > 0:
+        eyes = np.array([
+            _rescale_box((int(e[0]), int(e[1]), int(e[2]), int(e[3])), scale)
+            for e in eyes
+        ], dtype=np.int32)
     eye_pair = choose_eye_pair(eyes)
     if eye_pair is None:
         return None
@@ -1998,7 +2026,9 @@ def process_frame(
             return frame
         return cartoonize(frame)
 
-    faces_multi = detect_faces_multi(frame, face_cascade, profile_cascade, eye_cascade, max_faces=max_faces)
+    faces_multi: list[Tuple[int, int, int, int]] = []
+    if max_faces > 1:
+        faces_multi = detect_faces_multi(frame, face_cascade, profile_cascade, eye_cascade, max_faces=max_faces)
     state = estimate_pose(frame, face_cascade, eye_cascade, mouth_cascade, profile_cascade)
     now = time.monotonic()
     avatar_face_box = detect_avatar_face_box(avatar, face_cascade, profile_cascade)
