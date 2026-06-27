@@ -1608,6 +1608,62 @@ def detect_faces_frontal(
     return ordered[: max(1, int(max_faces))]
 
 
+def _bbox_iou(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> float:
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    ax2, ay2 = ax + aw, ay + ah
+    bx2, by2 = bx + bw, by + bh
+
+    ix1, iy1 = max(ax, bx), max(ay, by)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
+    inter = float(iw * ih)
+    union = float(aw * ah + bw * bh - inter)
+    if union <= 0.0:
+        return 0.0
+    return inter / union
+
+
+def detect_faces_multi(
+    frame: np.ndarray,
+    face_cascade: cv2.CascadeClassifier,
+    profile_cascade: Optional[cv2.CascadeClassifier],
+    eye_cascade: cv2.CascadeClassifier,
+    max_faces: int = 2,
+) -> list[Tuple[int, int, int, int]]:
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    candidates: list[Tuple[int, int, int, int]] = []
+
+    frontal = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(64, 64))
+    for face in frontal:
+        candidates.append(tuple(int(v) for v in face))
+
+    if profile_cascade is not None:
+        left = profile_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(64, 64))
+        for face in left:
+            candidates.append(tuple(int(v) for v in face))
+
+        flipped = cv2.flip(gray, 1)
+        right = profile_cascade.detectMultiScale(flipped, scaleFactor=1.1, minNeighbors=3, minSize=(64, 64))
+        frame_w = gray.shape[1]
+        for face in right:
+            x, y, w, h = (int(v) for v in face)
+            candidates.append((frame_w - (x + w), y, w, h))
+
+    eye_face = infer_face_from_eyes(frame, eye_cascade)
+    if eye_face is not None:
+        candidates.append(eye_face)
+
+    ordered = sorted(candidates, key=lambda item: item[2] * item[3], reverse=True)
+    merged: list[Tuple[int, int, int, int]] = []
+    for face in ordered:
+        if all(_bbox_iou(face, kept) < 0.35 for kept in merged):
+            merged.append(face)
+        if len(merged) >= max(1, int(max_faces)):
+            break
+    return merged
+
+
 def detect_avatar_face_box(
     avatar: np.ndarray,
     face_cascade: cv2.CascadeClassifier,
@@ -1689,6 +1745,38 @@ def choose_eye_pair(eyes: np.ndarray) -> Optional[Tuple[Tuple[int, int], Tuple[i
     return left_eye, right_eye
 
 
+def infer_face_from_eyes(frame: np.ndarray, eye_cascade: cv2.CascadeClassifier) -> Optional[Tuple[int, int, int, int]]:
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    eyes = eye_cascade.detectMultiScale(
+        gray,
+        scaleFactor=1.08,
+        minNeighbors=3,
+        minSize=(18, 12),
+    )
+    eye_pair = choose_eye_pair(eyes)
+    if eye_pair is None:
+        return None
+
+    left_eye, right_eye = eye_pair
+    eye_mid_x = (left_eye[0] + right_eye[0]) / 2.0
+    eye_mid_y = (left_eye[1] + right_eye[1]) / 2.0
+    eye_dist = max(24.0, float(abs(right_eye[0] - left_eye[0])))
+
+    face_w = int(eye_dist * 2.2)
+    face_h = int(face_w * 1.25)
+    x = int(eye_mid_x - face_w * 0.50)
+    y = int(eye_mid_y - face_h * 0.34)
+
+    frame_h, frame_w = gray.shape[:2]
+    x = max(0, min(x, frame_w - 1))
+    y = max(0, min(y, frame_h - 1))
+    w = max(24, min(face_w, frame_w - x))
+    h = max(24, min(face_h, frame_h - y))
+    if w < 24 or h < 24:
+        return None
+    return x, y, w, h
+
+
 def estimate_pose(
     frame: np.ndarray,
     face_cascade: cv2.CascadeClassifier,
@@ -1698,7 +1786,9 @@ def estimate_pose(
 ) -> Optional[FaceState]:
     face = detect_face(frame, face_cascade, profile_cascade)
     if face is None:
-        return None
+        face = infer_face_from_eyes(frame, eye_cascade)
+        if face is None:
+            return None
 
     x, y, w, h = face
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -1896,7 +1986,7 @@ def process_frame(
             return frame
         return cartoonize(frame)
 
-    faces_multi = detect_faces_frontal(frame, face_cascade, max_faces=2)
+    faces_multi = detect_faces_multi(frame, face_cascade, profile_cascade, eye_cascade, max_faces=2)
     state = estimate_pose(frame, face_cascade, eye_cascade, mouth_cascade, profile_cascade)
     now = time.monotonic()
     avatar_face_box = detect_avatar_face_box(avatar, face_cascade, profile_cascade)
