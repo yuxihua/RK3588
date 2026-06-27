@@ -1582,6 +1582,19 @@ def detect_face(
     return tuple(int(value) for value in candidates[0])
 
 
+def detect_faces_frontal(
+    frame: np.ndarray,
+    cascade: cv2.CascadeClassifier,
+    max_faces: int = 2,
+) -> list[Tuple[int, int, int, int]]:
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(72, 72))
+    if len(faces) == 0:
+        return []
+    ordered = sorted((tuple(int(v) for v in item) for item in faces), key=lambda item: item[2] * item[3], reverse=True)
+    return ordered[: max(1, int(max_faces))]
+
+
 def detect_avatar_face_box(
     avatar: np.ndarray,
     face_cascade: cv2.CascadeClassifier,
@@ -1867,9 +1880,45 @@ def process_frame(
             return frame
         return cartoonize(frame)
 
+    faces_multi = detect_faces_frontal(frame, face_cascade, max_faces=2)
     state = estimate_pose(frame, face_cascade, eye_cascade, mouth_cascade, profile_cascade)
     now = time.monotonic()
     avatar_face_box = detect_avatar_face_box(avatar, face_cascade, profile_cascade)
+
+    if len(faces_multi) >= 2:
+        if state is not None:
+            state = update_tracking(state)
+
+        if background_mode != "camera":
+            output_frame = get_static_stage_bgr(frame.shape[1], frame.shape[0]).copy()
+        else:
+            output_frame = frame.copy()
+
+        for idx, face in enumerate(faces_multi):
+            if idx == 0 and state is not None:
+                face_state = FaceState(
+                    face=face,
+                    angle=state.angle,
+                    mouth_open=state.mouth_open,
+                    eye_open=state.eye_open,
+                )
+                local_mouth_animation = mouth_animation
+            else:
+                face_state = FaceState(face=face, angle=0.0, mouth_open=0.0, eye_open=1.0)
+                local_mouth_animation = "off"
+
+            output_frame = composite_avatar(
+                output_frame,
+                avatar,
+                face_state,
+                now,
+                replace_background=False,
+                avatar_face_box=avatar_face_box,
+                avatar_scale=avatar_scale,
+                mouth_animation=local_mouth_animation,
+            )
+
+        return output_frame
 
     if state is not None:
         state = update_tracking(state)
