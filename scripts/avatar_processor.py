@@ -1555,26 +1555,29 @@ def animate_avatar_features(
                 seam_fill = np.repeat(seam, dst_start - lip_line, axis=0)
                 modified[lip_line:dst_start, :] = seam_fill
 
-        blend_mask = np.zeros((roi_h, roi_w, 1), dtype=np.float32)
-        blend_mask[max(0, lip_line - 1):, :, 0] = float(np.clip(0.60 + mouth * 0.35, 0.60, 0.95))
+        # Blend with an ellipse mask to avoid rectangular mouth artifacts.
+        mouth_mask = np.zeros((roi_h, roi_w), dtype=np.uint8)
+        mask_cx = roi_w // 2
+        mask_cy = min(roi_h - 1, lip_line + max(1, int(roi_h * (0.06 + 0.20 * mouth))))
+        mask_rx = max(3, int(roi_w * 0.42))
+        mask_ry = max(2, int(roi_h * (0.18 + 0.26 * mouth)))
+        cv2.ellipse(mouth_mask, (mask_cx, mask_cy), (mask_rx, mask_ry), 0, 0, 360, 255, -1)
+        mouth_mask = cv2.GaussianBlur(mouth_mask, (0, 0), max(1.0, roi_h * 0.12))
+        blend_mask = (mouth_mask.astype(np.float32) / 255.0)[:, :, None] * float(np.clip(0.68 + mouth * 0.22, 0.68, 0.92))
+
         mixed = mouth_roi.astype(np.float32) * (1.0 - blend_mask) + modified.astype(np.float32) * blend_mask
         mixed_u8 = np.clip(mixed, 0, 255).astype(np.uint8)
 
-        # Recover local sharpness only around the mouth band to avoid smearing the whole face.
-        mouth_bgr = mixed_u8[max(0, lip_line - 3):, :, :3]
+        # Keep details but only inside the mouth ellipse to avoid a box-shaped enhancement.
+        sharpen_mask = (mouth_mask.astype(np.float32) / 255.0)[:, :, None]
+        mouth_bgr = mixed_u8[:, :, :3]
         blur = cv2.GaussianBlur(mouth_bgr, (0, 0), 1.0)
-        sharp = cv2.addWeighted(mouth_bgr, 1.85, blur, -0.85, 0)
-        mixed_u8[max(0, lip_line - 3):, :, :3] = np.clip(sharp, 0, 255).astype(np.uint8)
-
-        if mouth > 0.12:
-            mouth_gap_y1 = min(roi_h - 1, lip_line + max(1, int(roi_h * 0.04)))
-            mouth_gap_y2 = min(roi_h, mouth_gap_y1 + max(1, int(roi_h * 0.10 * mouth)))
-            if mouth_gap_y2 > mouth_gap_y1:
-                mixed_u8[mouth_gap_y1:mouth_gap_y2, :, :3] = np.clip(
-                    mixed_u8[mouth_gap_y1:mouth_gap_y2, :, :3].astype(np.float32) * 0.45,
-                    0,
-                    255,
-                ).astype(np.uint8)
+        sharp = cv2.addWeighted(mouth_bgr, 1.50, blur, -0.50, 0)
+        mixed_u8[:, :, :3] = np.clip(
+            mouth_bgr.astype(np.float32) * (1.0 - sharpen_mask) + sharp.astype(np.float32) * sharpen_mask,
+            0,
+            255,
+        ).astype(np.uint8)
 
         animated[my1:my2, mx1:mx2] = mixed_u8
 
