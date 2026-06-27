@@ -1771,10 +1771,11 @@ def crop_avatar_face_region(
     ax, ay, aw, ah = face_box
     h, w = avatar.shape[:2]
 
-    x1 = max(0, int(ax - 0.20 * aw))
-    x2 = min(w, int(ax + aw + 0.20 * aw))
-    y1 = max(0, int(ay - 0.18 * ah))
-    y2 = min(h, int(ay + ah + 0.18 * ah))
+    # Head crop (not torso): keep hair and chin area for full head replacement.
+    x1 = max(0, int(ax - 0.36 * aw))
+    x2 = min(w, int(ax + aw + 0.36 * aw))
+    y1 = max(0, int(ay - 0.68 * ah))
+    y2 = min(h, int(ay + ah + 0.62 * ah))
 
     if x2 - x1 < 8 or y2 - y1 < 8:
         return avatar, face_box
@@ -1797,13 +1798,14 @@ def apply_face_only_alpha_mask(
 
     mask = np.zeros((h, w), dtype=np.uint8)
     cx = int(fx + fw * 0.50)
-    cy = int(fy + fh * 0.52)
-    rx = max(8, int(fw * 0.72))
-    ry = max(10, int(fh * 0.92))
+    cy = int(fy + fh * 0.46)
+    rx = max(10, int(fw * 0.95))
+    ry = max(12, int(fh * 1.35))
 
+    # Main head ellipse + jaw support ellipse to avoid flat cut under chin.
     cv2.ellipse(mask, (cx, cy), (rx, ry), 0, 0, 360, 255, -1)
-    cv2.ellipse(mask, (cx, int(cy - fh * 0.40)), (max(6, int(rx * 0.72)), max(6, int(ry * 0.52))), 0, 0, 360, 255, -1)
-    mask = cv2.GaussianBlur(mask, (0, 0), max(2.0, fh * 0.12))
+    cv2.ellipse(mask, (cx, int(cy + fh * 0.72)), (max(8, int(rx * 0.56)), max(8, int(ry * 0.42))), 0, 0, 360, 255, -1)
+    mask = cv2.GaussianBlur(mask, (0, 0), max(2.0, fh * 0.22))
 
     masked = avatar_rgba.copy()
     alpha = masked[:, :, 3].astype(np.float32)
@@ -2015,7 +2017,7 @@ def composite_avatar_face_swap(
     scaled_face_box: Optional[Tuple[int, int, int, int]] = None
     if source_face_box is not None:
         sfx, sfy, sfw, sfh = source_face_box
-        target_face_w = max(36, int(w * 0.95 * scale_mul))
+        target_face_w = max(40, int(w * 1.18 * scale_mul))
         scale = target_face_w / max(1.0, float(sfw))
         patch_w = max(48, int(source_avatar.shape[1] * scale))
         patch_h = max(48, int(source_avatar.shape[0] * scale))
@@ -2028,8 +2030,8 @@ def composite_avatar_face_swap(
             int(sfh * scale_y),
         )
     else:
-        patch_w = int(w * 0.95 * scale_mul)
-        patch_h = int(h * (0.95 * scale_mul))
+        patch_w = int(w * 1.18 * scale_mul)
+        patch_h = int(h * (1.18 * scale_mul))
 
     resized_avatar = cv2.resize(source_avatar, (patch_w, patch_h), interpolation=cv2.INTER_AREA)
     blink_level = max(TRACKING_STATE.blink_progress, 1.0 - state.eye_open)

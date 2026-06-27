@@ -27,8 +27,8 @@ AVATAR_GPIO_01="${AVATAR_GPIO_01:-avatar_01}"
 AVATAR_GPIO_10="${AVATAR_GPIO_10:-avatar_10}"
 AVATAR_GPIO_11="${AVATAR_GPIO_11:-avatar_11}"
 
-WIDTH="${WIDTH:-1280}"
-HEIGHT="${HEIGHT:-720}"
+WIDTH="${WIDTH:-960}"
+HEIGHT="${HEIGHT:-540}"
 FPS="${FPS:-15}"
 
 resolve_avatar_fallback() {

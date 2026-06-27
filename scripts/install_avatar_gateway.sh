@@ -84,8 +84,8 @@ AVATAR_SCALE=1.0
 EYE_ANIMATION=off
 MOUTH_ANIMATION=off
 MAX_FACES=1
-WIDTH=1280
-HEIGHT=720
+WIDTH=960
+HEIGHT=540
 FPS=15
 EOF
 fi
@@ -127,10 +127,10 @@ if ! grep -q '^MAX_FACES=' "$ENV_FILE"; then
   echo 'MAX_FACES=1' >> "$ENV_FILE"
 fi
 if ! grep -q '^WIDTH=' "$ENV_FILE"; then
-  echo 'WIDTH=1280' >> "$ENV_FILE"
+  echo 'WIDTH=960' >> "$ENV_FILE"
 fi
 if ! grep -q '^HEIGHT=' "$ENV_FILE"; then
-  echo 'HEIGHT=720' >> "$ENV_FILE"
+  echo 'HEIGHT=540' >> "$ENV_FILE"
 fi
 if ! grep -q '^FPS=' "$ENV_FILE"; then
   echo 'FPS=15' >> "$ENV_FILE"
@@ -153,10 +153,16 @@ if grep -q '^MOUTH_ANIMATION=off$' "$ENV_FILE"; then
   sed -i 's/^MOUTH_ANIMATION=off$/MOUTH_ANIMATION=subtle/' "$ENV_FILE"
 fi
 if grep -q '^WIDTH=640$' "$ENV_FILE"; then
-  sed -i 's/^WIDTH=640$/WIDTH=1280/' "$ENV_FILE"
+  sed -i 's/^WIDTH=640$/WIDTH=960/' "$ENV_FILE"
 fi
 if grep -q '^HEIGHT=360$' "$ENV_FILE"; then
-  sed -i 's/^HEIGHT=360$/HEIGHT=720/' "$ENV_FILE"
+  sed -i 's/^HEIGHT=360$/HEIGHT=540/' "$ENV_FILE"
+fi
+if grep -q '^WIDTH=1280$' "$ENV_FILE"; then
+  sed -i 's/^WIDTH=1280$/WIDTH=960/' "$ENV_FILE"
+fi
+if grep -q '^HEIGHT=720$' "$ENV_FILE"; then
+  sed -i 's/^HEIGHT=720$/HEIGHT=540/' "$ENV_FILE"
 fi
 if grep -q '^FPS=30$' "$ENV_FILE"; then
   sed -i 's/^FPS=30$/FPS=15/' "$ENV_FILE"
@@ -195,8 +201,8 @@ Environment=AVATAR_SCALE=1.0
 Environment=EYE_ANIMATION=subtle
 Environment=MOUTH_ANIMATION=subtle
 Environment=MAX_FACES=1
-Environment=WIDTH=1280
-Environment=HEIGHT=720
+Environment=WIDTH=960
+Environment=HEIGHT=540
 Environment=FPS=15
 ExecStart=$INSTALL_ROOT/scripts/run_avatar_gateway.sh
 Restart=always
