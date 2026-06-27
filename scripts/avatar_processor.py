@@ -1848,9 +1848,10 @@ def animate_avatar_features(
     if mouth_animation == "off":
         mouth = 0.0
     elif mouth_animation == "subtle":
-        mouth = float(np.clip((mouth_raw - 0.02) * 1.85, 0.0, 0.52))
+        mouth = float(np.clip((mouth_raw - 0.06) * 1.15, 0.0, 0.34))
     else:
-        mouth = float(np.clip((mouth_raw - 0.015) * 4.20, 0.0, 1.0))
+        # Keep default mode conservative to avoid uncanny over-opening.
+        mouth = float(np.clip((mouth_raw - 0.05) * 1.85, 0.0, 0.62))
     # Smoothstep easing avoids abrupt mouth pops near threshold.
     mouth = mouth * mouth * (3.0 - 2.0 * mouth)
 
@@ -1886,9 +1887,9 @@ def animate_avatar_features(
     else:
         mouth_anchor_x = float(mouth_anchor[0])
         mouth_anchor_y = float(mouth_anchor[1])
-    mouth_cx = int(w * np.clip(mouth_anchor_x + float(mouth_x_offset), 0.20, 0.80))
+    mouth_cx = int(w * np.clip(mouth_anchor_x + float(mouth_x_offset), 0.24, 0.76))
     # Place the mouth ROI in the lower face area and allow fine adjustment.
-    mouth_cy = int(h * np.clip(mouth_anchor_y + float(mouth_y_offset), 0.34, 0.82))
+    mouth_cy = int(h * np.clip(mouth_anchor_y + float(mouth_y_offset), 0.40, 0.76))
     mx1 = max(0, mouth_cx - mouth_box_w // 2)
     mx2 = min(w, mouth_cx + mouth_box_w // 2)
     my1 = max(0, mouth_cy - mouth_box_h // 2)
@@ -2379,7 +2380,13 @@ def estimate_pose(
     if len(mouths) > 0:
         mouths = sorted(mouths, key=lambda item: item[2] * item[3], reverse=True)
         mx, my, mw, mh = (int(value) for value in mouths[0])
-        mouth_open = min(1.0, mh / max(1.0, h * 0.24))
+        # Use aspect-driven openness to reduce false positives from smile detector.
+        aspect = mh / max(1.0, float(mw))
+        aspect_term = (aspect - 0.16) * 3.1
+        height_term = (mh / max(1.0, h * 0.30) - 0.34) * 1.8
+        mouth_open = float(np.clip(0.72 * aspect_term + 0.28 * height_term, 0.0, 1.0))
+        if mouth_open < 0.09:
+            mouth_open = 0.0
     else:
         # Fallback heuristic when cascade misses the mouth in low resolution.
         y1 = int(h * 0.58)
@@ -2391,7 +2398,9 @@ def estimate_pose(
             blur = cv2.GaussianBlur(lower_roi, (5, 5), 0)
             _, dark = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
             dark_ratio = float(np.mean(dark > 0))
-            mouth_open = float(np.clip((dark_ratio - 0.14) * 2.4, 0.0, 0.45))
+            mouth_open = float(np.clip((dark_ratio - 0.19) * 1.6, 0.0, 0.36))
+            if mouth_open < 0.08:
+                mouth_open = 0.0
 
     return FaceState(face=face, angle=angle, mouth_open=mouth_open, eye_open=eye_open)
 
@@ -2419,7 +2428,9 @@ def update_tracking(state: FaceState, now: Optional[float] = None) -> FaceState:
 
     TRACKING_STATE.face = smooth_face(TRACKING_STATE.face, state.face)
     TRACKING_STATE.angle = smooth_value(TRACKING_STATE.angle, state.angle, 0.78)
-    TRACKING_STATE.mouth_open = smooth_value(TRACKING_STATE.mouth_open, state.mouth_open, 0.45)
+    TRACKING_STATE.mouth_open = smooth_value(TRACKING_STATE.mouth_open, state.mouth_open, 0.72)
+    if TRACKING_STATE.mouth_open < 0.06:
+        TRACKING_STATE.mouth_open = 0.0
     TRACKING_STATE.eye_open = smooth_value(TRACKING_STATE.eye_open, state.eye_open, 0.72)
     TRACKING_STATE.last_face_at = float(now if now is not None else time.monotonic())
 
@@ -2491,7 +2502,7 @@ def composite_avatar_face_swap(
         afx, afy, afw, afh = scaled_face_box
         mouth_anchor = (
             (afx + afw * 0.50) / max(1.0, float(patch_w)),
-            (afy + afh * 0.66) / max(1.0, float(patch_h)),
+            (afy + afh * 0.61) / max(1.0, float(patch_h)),
         )
     else:
         patch_w = int(w * 1.03 * scale_mul)
