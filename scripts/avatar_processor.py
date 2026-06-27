@@ -46,6 +46,7 @@ class TrackingState:
     eye_open: float = 1.0
     blink_progress: float = 0.0
     next_blink_at: float = 0.0
+    last_face_at: float = 0.0
 
 
 STOP_REQUESTED = False
@@ -844,11 +845,25 @@ def smooth_face(previous: Optional[Tuple[float, float, float, float]], current: 
     if previous is None:
         return tuple(float(value) for value in current)
 
+    prev_cx = previous[0] + previous[2] * 0.5
+    prev_cy = previous[1] + previous[3] * 0.5
+    curr_cx = float(current[0]) + float(current[2]) * 0.5
+    curr_cy = float(current[1]) + float(current[3]) * 0.5
+    move_dist = float(np.hypot(curr_cx - prev_cx, curr_cy - prev_cy))
+    face_ref = max(1.0, previous[2], previous[3], float(current[2]), float(current[3]))
+
+    if move_dist > face_ref * 0.22:
+        factor = 0.34
+    elif move_dist > face_ref * 0.12:
+        factor = 0.52
+    else:
+        factor = 0.76
+
     return (
-        smooth_value(previous[0], float(current[0])),
-        smooth_value(previous[1], float(current[1])),
-        smooth_value(previous[2], float(current[2])),
-        smooth_value(previous[3], float(current[3])),
+        smooth_value(previous[0], float(current[0]), factor),
+        smooth_value(previous[1], float(current[1]), factor),
+        smooth_value(previous[2], float(current[2]), factor),
+        smooth_value(previous[3], float(current[3]), factor),
     )
 
 
@@ -1651,6 +1666,25 @@ def detect_face(
 
     if len(candidates) == 0:
         return None
+
+    if TRACKING_STATE.face is not None:
+        px, py, pw, ph = TRACKING_STATE.face
+        prev_cx = px + pw * 0.5
+        prev_cy = py + ph * 0.5
+        ref = max(1.0, pw, ph)
+
+        def score(candidate: Tuple[int, int, int, int]) -> float:
+            x, y, w, h = candidate
+            area = float(w * h)
+            cx = x + w * 0.5
+            cy = y + h * 0.5
+            dist = float(np.hypot(cx - prev_cx, cy - prev_cy))
+            dist_norm = dist / ref
+            return area / (1.0 + 1.8 * dist_norm * dist_norm)
+
+        best = max(candidates, key=score)
+        return tuple(int(value) for value in best)
+
     candidates = sorted(candidates, key=lambda item: item[2] * item[3], reverse=True)
     return tuple(int(value) for value in candidates[0])
 
@@ -1993,13 +2027,14 @@ def update_blink_state(state: FaceState, now: float) -> float:
     return max(TRACKING_STATE.blink_progress, actual_blink * 0.85)
 
 
-def update_tracking(state: FaceState) -> FaceState:
+def update_tracking(state: FaceState, now: Optional[float] = None) -> FaceState:
     global TRACKING_STATE
 
     TRACKING_STATE.face = smooth_face(TRACKING_STATE.face, state.face)
     TRACKING_STATE.angle = smooth_value(TRACKING_STATE.angle, state.angle, 0.78)
     TRACKING_STATE.mouth_open = smooth_value(TRACKING_STATE.mouth_open, state.mouth_open, 0.45)
     TRACKING_STATE.eye_open = smooth_value(TRACKING_STATE.eye_open, state.eye_open, 0.72)
+    TRACKING_STATE.last_face_at = float(now if now is not None else time.monotonic())
 
     smoothed_face = TRACKING_STATE.face
     if smoothed_face is None:
@@ -2196,16 +2231,16 @@ def process_frame(
     faces_multi: list[Tuple[int, int, int, int]] = []
     detect_stride = max(1, int(detect_every))
     must_detect = TRACKING_STATE.face is None or (FRAME_COUNTER % detect_stride == 0)
+    now = time.monotonic()
 
     if max_faces > 1 and must_detect:
         faces_multi = detect_faces_multi(frame, face_cascade, profile_cascade, eye_cascade, max_faces=max_faces)
     state = estimate_pose(frame, face_cascade, eye_cascade, mouth_cascade, profile_cascade) if must_detect else None
-    now = time.monotonic()
     avatar_face_box = detect_avatar_face_box(avatar, face_cascade, profile_cascade)
 
     if max_faces > 1 and len(faces_multi) >= 2:
         if state is not None:
-            state = update_tracking(state)
+            state = update_tracking(state, now)
 
         output_frame = frame.copy()
 
@@ -2236,9 +2271,9 @@ def process_frame(
         return output_frame
 
     if state is not None:
-        state = update_tracking(state)
+        state = update_tracking(state, now)
     else:
-        if TRACKING_STATE.face is not None:
+        if TRACKING_STATE.face is not None and (now - TRACKING_STATE.last_face_at) <= 0.42:
             smoothed_face = TRACKING_STATE.face
             state = FaceState(
                 face=(
@@ -2252,7 +2287,8 @@ def process_frame(
                 eye_open=max(0.75, TRACKING_STATE.eye_open),
             )
         else:
-            state = _default_idle_face(frame)
+            TRACKING_STATE.face = None
+            return frame
 
     update_blink_state(state, now)
     return composite_avatar_face_swap(
