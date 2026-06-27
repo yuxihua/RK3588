@@ -83,6 +83,9 @@ BACKGROUND_MODE=camera
 AVATAR_SCALE=1.0
 EYE_ANIMATION=off
 MOUTH_ANIMATION=off
+WIDTH=1280
+HEIGHT=720
+FPS=30
 EOF
 fi
 
@@ -119,6 +122,15 @@ fi
 if ! grep -q '^MOUTH_ANIMATION=' "$ENV_FILE"; then
   echo 'MOUTH_ANIMATION=off' >> "$ENV_FILE"
 fi
+if ! grep -q '^WIDTH=' "$ENV_FILE"; then
+  echo 'WIDTH=1280' >> "$ENV_FILE"
+fi
+if ! grep -q '^HEIGHT=' "$ENV_FILE"; then
+  echo 'HEIGHT=720' >> "$ENV_FILE"
+fi
+if ! grep -q '^FPS=' "$ENV_FILE"; then
+  echo 'FPS=30' >> "$ENV_FILE"
+fi
 
 # Migrate legacy defaults from older installs so virtual avatar works out-of-box.
 if grep -q '^AVATAR_NAME=avatar$' "$ENV_FILE"; then
@@ -129,6 +141,15 @@ if grep -q '^GPIO_AVATAR_SELECT=1$' "$ENV_FILE"; then
 fi
 if grep -q '^FALLBACK_STYLE=cartoon$' "$ENV_FILE"; then
   sed -i 's/^FALLBACK_STYLE=cartoon$/FALLBACK_STYLE=normal/' "$ENV_FILE"
+fi
+if grep -q '^WIDTH=640$' "$ENV_FILE"; then
+  sed -i 's/^WIDTH=640$/WIDTH=1280/' "$ENV_FILE"
+fi
+if grep -q '^HEIGHT=360$' "$ENV_FILE"; then
+  sed -i 's/^HEIGHT=360$/HEIGHT=720/' "$ENV_FILE"
+fi
+if grep -q '^FPS=15$' "$ENV_FILE"; then
+  sed -i 's/^FPS=15$/FPS=30/' "$ENV_FILE"
 fi
 
 cat > "$SERVICE_FILE" <<EOF
@@ -160,6 +181,9 @@ Environment=BACKGROUND_MODE=camera
 Environment=AVATAR_SCALE=1.0
 Environment=EYE_ANIMATION=off
 Environment=MOUTH_ANIMATION=off
+Environment=WIDTH=1280
+Environment=HEIGHT=720
+Environment=FPS=30
 ExecStart=$INSTALL_ROOT/scripts/run_avatar_gateway.sh
 Restart=always
 RestartSec=1

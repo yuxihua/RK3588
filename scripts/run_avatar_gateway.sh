@@ -26,9 +26,9 @@ AVATAR_GPIO_01="${AVATAR_GPIO_01:-avatar_01}"
 AVATAR_GPIO_10="${AVATAR_GPIO_10:-avatar_10}"
 AVATAR_GPIO_11="${AVATAR_GPIO_11:-avatar_11}"
 
-WIDTH="${WIDTH:-640}"
-HEIGHT="${HEIGHT:-360}"
-FPS="${FPS:-15}"
+WIDTH="${WIDTH:-1280}"
+HEIGHT="${HEIGHT:-720}"
+FPS="${FPS:-30}"
 
 resolve_avatar_fallback() {
 	local candidates=(
