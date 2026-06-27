@@ -1444,11 +1444,11 @@ def animate_avatar_features(avatar_rgba: np.ndarray, blink_progress: float, mout
 
         animated[y1:y2, x1:x2] = squeezed
 
-    mouth_box_w = max(24, int(w * 0.30))
-    mouth_box_h = max(16, int(h * 0.20))
+    mouth_box_w = max(22, int(w * 0.26))
+    mouth_box_h = max(14, int(h * 0.14))
     mouth_cx = int(w * 0.50)
     # Portrait avatars often include torso; place mouth ROI in upper face area.
-    mouth_cy = int(h * 0.44)
+    mouth_cy = int(h * 0.46)
     mx1 = max(0, mouth_cx - mouth_box_w // 2)
     mx2 = min(w, mouth_cx + mouth_box_w // 2)
     my1 = max(0, mouth_cy - mouth_box_h // 2)
@@ -1457,35 +1457,35 @@ def animate_avatar_features(avatar_rgba: np.ndarray, blink_progress: float, mout
     if mouth > 0.005 and mx2 - mx1 >= 2 and my2 - my1 >= 2:
         mouth_roi = animated[my1:my2, mx1:mx2]
         roi_h, roi_w = mouth_roi.shape[:2]
-        mid = max(1, roi_h // 2)
-        top = mouth_roi[:mid, :].copy()
-        bottom = mouth_roi[mid:, :].copy()
+        lip_line = max(1, int(roi_h * 0.58))
+        upper = mouth_roi[:lip_line, :].copy()
+        lower = mouth_roi[lip_line:, :].copy()
 
-        shift = max(1, int(roi_h * 0.85 * mouth))
+        shift = max(1, int(roi_h * 0.34 * mouth))
         modified = mouth_roi.copy()
-        modified[:mid, :] = top
+        modified[:lip_line, :] = upper
 
-        dst_start = min(roi_h - 1, mid + shift)
-        avail = roi_h - dst_start
-        if avail > 0 and bottom.size > 0:
-            bottom_scaled = cv2.resize(bottom, (roi_w, avail), interpolation=cv2.INTER_LINEAR)
-            modified[dst_start:, :] = bottom_scaled
+        dst_start = min(roi_h - 1, lip_line + shift)
+        avail = min(lower.shape[0], roi_h - dst_start)
+        if avail > 0 and lower.size > 0:
+            modified[dst_start:dst_start + avail, :] = lower[:avail, :]
 
-        if dst_start > mid:
-            bridge_src = mouth_roi[max(0, mid - 1): min(roi_h, mid + 1), :]
-            if bridge_src.size > 0:
-                bridge = cv2.resize(bridge_src, (roi_w, dst_start - mid), interpolation=cv2.INTER_LINEAR)
-                modified[mid:dst_start, :] = bridge
+        if dst_start > lip_line:
+            seam = mouth_roi[max(0, lip_line - 1):lip_line, :]
+            if seam.size > 0:
+                seam_fill = np.repeat(seam, dst_start - lip_line, axis=0)
+                modified[lip_line:dst_start, :] = seam_fill
 
-        blend = float(np.clip(0.60 + mouth * 0.35, 0.60, 0.95))
-        mixed = mouth_roi.astype(np.float32) * (1.0 - blend) + modified.astype(np.float32) * blend
+        blend_mask = np.zeros((roi_h, roi_w, 1), dtype=np.float32)
+        blend_mask[max(0, lip_line - 1):, :, 0] = float(np.clip(0.55 + mouth * 0.30, 0.55, 0.85))
+        mixed = mouth_roi.astype(np.float32) * (1.0 - blend_mask) + modified.astype(np.float32) * blend_mask
         mixed_u8 = np.clip(mixed, 0, 255).astype(np.uint8)
 
-        # Recover local sharpness so mouth motion is visible and less blurry.
-        mouth_bgr = mixed_u8[:, :, :3]
+        # Recover local sharpness only around the mouth band to avoid smearing the whole face.
+        mouth_bgr = mixed_u8[max(0, lip_line - 2):, :, :3]
         blur = cv2.GaussianBlur(mouth_bgr, (0, 0), 1.0)
-        sharp = cv2.addWeighted(mouth_bgr, 1.65, blur, -0.65, 0)
-        mixed_u8[:, :, :3] = np.clip(sharp, 0, 255).astype(np.uint8)
+        sharp = cv2.addWeighted(mouth_bgr, 1.85, blur, -0.85, 0)
+        mixed_u8[max(0, lip_line - 2):, :, :3] = np.clip(sharp, 0, 255).astype(np.uint8)
 
         animated[my1:my2, mx1:mx2] = mixed_u8
 
