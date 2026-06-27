@@ -81,6 +81,7 @@ NETWORK_JPEG_QUALITY=85
 FALLBACK_STYLE=cartoon
 BACKGROUND_MODE=camera
 AVATAR_SCALE=1.0
+MOUTH_ANIMATION=off
 EOF
 fi
 
@@ -110,6 +111,9 @@ if ! grep -q '^BACKGROUND_MODE=' "$ENV_FILE"; then
 fi
 if ! grep -q '^AVATAR_SCALE=' "$ENV_FILE"; then
   echo 'AVATAR_SCALE=1.0' >> "$ENV_FILE"
+fi
+if ! grep -q '^MOUTH_ANIMATION=' "$ENV_FILE"; then
+  echo 'MOUTH_ANIMATION=off' >> "$ENV_FILE"
 fi
 
 # Migrate legacy defaults from older installs so virtual avatar works out-of-box.
@@ -150,6 +154,7 @@ Environment=NETWORK_JPEG_QUALITY=85
 Environment=FALLBACK_STYLE=normal
 Environment=BACKGROUND_MODE=camera
 Environment=AVATAR_SCALE=1.0
+Environment=MOUTH_ANIMATION=off
 ExecStart=$INSTALL_ROOT/scripts/run_avatar_gateway.sh
 Restart=always
 RestartSec=1

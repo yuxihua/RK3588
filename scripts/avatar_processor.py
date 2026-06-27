@@ -133,6 +133,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mirror", action="store_true", help="Mirror the camera image")
     parser.add_argument("--avatar-scale", type=float, default=1.0, help="Scale multiplier for avatar size")
     parser.add_argument(
+        "--mouth-animation",
+        choices=["off", "subtle", "normal"],
+        default="off",
+        help="Mouth animation strength for avatar",
+    )
+    parser.add_argument(
         "--background-mode",
         choices=["virtual", "camera"],
         default="virtual",
@@ -1442,7 +1448,12 @@ def _squeeze_rgba_region(region: np.ndarray, vertical_scale: float) -> np.ndarra
     return out
 
 
-def animate_avatar_features(avatar_rgba: np.ndarray, blink_progress: float, mouth_open: float) -> np.ndarray:
+def animate_avatar_features(
+    avatar_rgba: np.ndarray,
+    blink_progress: float,
+    mouth_open: float,
+    mouth_animation: str = "off",
+) -> np.ndarray:
     if avatar_rgba.ndim != 3 or avatar_rgba.shape[2] != 4:
         return avatar_rgba
 
@@ -1450,8 +1461,12 @@ def animate_avatar_features(avatar_rgba: np.ndarray, blink_progress: float, mout
     h, w = animated.shape[:2]
     blink = float(np.clip(blink_progress, 0.0, 1.0))
     mouth_raw = float(np.clip(mouth_open, 0.0, 1.0))
-    # Stronger amplification for low-resolution camera input.
-    mouth = float(np.clip((mouth_raw - 0.005) * 5.0, 0.0, 1.0))
+    if mouth_animation == "off":
+        mouth = 0.0
+    elif mouth_animation == "subtle":
+        mouth = float(np.clip((mouth_raw - 0.02) * 1.7, 0.0, 0.45))
+    else:
+        mouth = float(np.clip((mouth_raw - 0.005) * 5.0, 0.0, 1.0))
 
     eye_box_w = max(12, int(w * 0.24))
     eye_box_h = max(10, int(h * 0.16))
@@ -1776,6 +1791,7 @@ def composite_avatar(
     replace_background: bool = True,
     avatar_face_box: Optional[Tuple[int, int, int, int]] = None,
     avatar_scale: float = 1.0,
+    mouth_animation: str = "off",
 ) -> np.ndarray:
     x, y, w, h = state.face
     face_center_x = x + w / 2.0
@@ -1801,7 +1817,12 @@ def composite_avatar(
 
     resized_avatar = cv2.resize(source_avatar, (head_w, head_h), interpolation=cv2.INTER_AREA)
     blink_level = max(TRACKING_STATE.blink_progress, 1.0 - state.eye_open)
-    animated_avatar = animate_avatar_features(resized_avatar, blink_level, state.mouth_open)
+    animated_avatar = animate_avatar_features(
+        resized_avatar,
+        blink_level,
+        state.mouth_open,
+        mouth_animation,
+    )
     # Keep alignment stable: avoid adding rotation offset when fitting face-to-face.
     rotated_avatar = animated_avatar
 
@@ -1839,6 +1860,7 @@ def process_frame(
     fallback_style: str,
     background_mode: str,
     avatar_scale: float,
+    mouth_animation: str,
 ) -> np.ndarray:
     if avatar is None:
         if fallback_style == "normal":
@@ -1877,6 +1899,7 @@ def process_frame(
         replace_background=(background_mode != "camera"),
         avatar_face_box=avatar_face_box,
         avatar_scale=avatar_scale,
+        mouth_animation=mouth_animation,
     )
 
 
@@ -1921,6 +1944,7 @@ def main() -> int:
     print(f"avatar={'yes' if avatar is not None else 'no'}")
     print(f"avatar_path={avatar_path or 'none'}")
     print(f"avatar_scale={args.avatar_scale}")
+    print(f"mouth_animation={args.mouth_animation}")
     print(f"fallback_style={args.fallback_style}")
     print(f"background_mode={args.background_mode}")
     print(f"gpio_avatar_select={'on' if gpio_selector.enabled else 'off'}")
@@ -1952,6 +1976,7 @@ def main() -> int:
                 args.fallback_style,
                 args.background_mode,
                 args.avatar_scale,
+                args.mouth_animation,
             )
             if output_frame.shape[1] != output_spec.width or output_frame.shape[0] != output_spec.height:
                 output_frame = cv2.resize(output_frame, (output_spec.width, output_spec.height), interpolation=cv2.INTER_AREA)
