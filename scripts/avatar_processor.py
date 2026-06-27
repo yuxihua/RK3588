@@ -1471,21 +1471,26 @@ def animate_avatar_features(
     if eye_animation == "off":
         blink = 0.0
     elif eye_animation == "subtle":
-        blink = float(np.clip(blink_raw * 0.45, 0.0, 0.45))
+        blink = float(np.clip(blink_raw * 0.22, 0.0, 0.28))
     else:
         blink = blink_raw
     mouth_raw = float(np.clip(mouth_open, 0.0, 1.0))
     if mouth_animation == "off":
         mouth = 0.0
     elif mouth_animation == "subtle":
-        mouth = float(np.clip((mouth_raw - 0.02) * 1.7, 0.0, 0.45))
+        mouth = float(np.clip((mouth_raw - 0.02) * 1.25, 0.0, 0.28))
     else:
         mouth = float(np.clip((mouth_raw - 0.005) * 5.0, 0.0, 1.0))
 
     eye_box_w = max(12, int(w * 0.24))
     eye_box_h = max(10, int(h * 0.16))
     eye_y_center = int(h * 0.34)
-    eye_scale = max(0.18, 1.0 - blink * 0.78)
+    if eye_animation == "subtle":
+        eye_scale = max(0.82, 1.0 - blink * 0.35)
+    elif eye_animation == "normal":
+        eye_scale = max(0.54, 1.0 - blink * 0.62)
+    else:
+        eye_scale = 1.0
 
     for cx_ratio in (0.34, 0.66):
         cx = int(w * cx_ratio)
@@ -1766,10 +1771,10 @@ def crop_avatar_face_region(
     ax, ay, aw, ah = face_box
     h, w = avatar.shape[:2]
 
-    x1 = max(0, int(ax - 0.55 * aw))
-    x2 = min(w, int(ax + aw + 0.55 * aw))
-    y1 = max(0, int(ay - 0.35 * ah))
-    y2 = min(h, int(ay + ah + 0.45 * ah))
+    x1 = max(0, int(ax - 0.20 * aw))
+    x2 = min(w, int(ax + aw + 0.20 * aw))
+    y1 = max(0, int(ay - 0.18 * ah))
+    y2 = min(h, int(ay + ah + 0.18 * ah))
 
     if x2 - x1 < 8 or y2 - y1 < 8:
         return avatar, face_box
@@ -1980,13 +1985,13 @@ def composite_avatar_face_swap(
 
     if source_face_box is not None:
         _, _, sfw, _ = source_face_box
-        target_face_w = max(40, int(w * 1.30 * scale_mul))
+        target_face_w = max(36, int(w * 0.95 * scale_mul))
         scale = target_face_w / max(1.0, float(sfw))
         patch_w = max(48, int(source_avatar.shape[1] * scale))
         patch_h = max(48, int(source_avatar.shape[0] * scale))
     else:
-        patch_w = int(w * 1.30 * scale_mul)
-        patch_h = int(h * (1.10 * scale_mul))
+        patch_w = int(w * 0.95 * scale_mul)
+        patch_h = int(h * (0.95 * scale_mul))
 
     resized_avatar = cv2.resize(source_avatar, (patch_w, patch_h), interpolation=cv2.INTER_AREA)
     blink_level = max(TRACKING_STATE.blink_progress, 1.0 - state.eye_open)
