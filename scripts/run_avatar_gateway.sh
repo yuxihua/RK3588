@@ -16,6 +16,7 @@ BACKGROUND_MODE="${BACKGROUND_MODE:-camera}"
 AVATAR_SCALE="${AVATAR_SCALE:-1.0}"
 EYE_ANIMATION="${EYE_ANIMATION:-off}"
 MOUTH_ANIMATION="${MOUTH_ANIMATION:-off}"
+MAX_FACES="${MAX_FACES:-1}"
 
 AVATAR_NAME="${AVATAR_NAME:-avatar_male}"
 GPIO_AVATAR_SELECT="${GPIO_AVATAR_SELECT:-0}"
@@ -28,7 +29,7 @@ AVATAR_GPIO_11="${AVATAR_GPIO_11:-avatar_11}"
 
 WIDTH="${WIDTH:-1280}"
 HEIGHT="${HEIGHT:-720}"
-FPS="${FPS:-30}"
+FPS="${FPS:-20}"
 
 resolve_avatar_fallback() {
 	local candidates=(
@@ -61,6 +62,7 @@ ARGS=(
 	--avatar-scale "$AVATAR_SCALE"
 	--eye-animation "$EYE_ANIMATION"
 	--mouth-animation "$MOUTH_ANIMATION"
+	--max-faces "$MAX_FACES"
 	--avatar "$AVATAR_FALLBACK_PATH"
 	--avatar-dir "$ROOT_DIR/assets/avatars"
 	--avatar-name "$AVATAR_NAME"
