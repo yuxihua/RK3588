@@ -1783,6 +1783,35 @@ def crop_avatar_face_region(
     return cropped, (ax - x1, ay - y1, aw, ah)
 
 
+def apply_face_only_alpha_mask(
+    avatar_rgba: np.ndarray,
+    face_box: Tuple[int, int, int, int],
+) -> np.ndarray:
+    if avatar_rgba.ndim != 3 or avatar_rgba.shape[2] != 4:
+        return avatar_rgba
+
+    h, w = avatar_rgba.shape[:2]
+    fx, fy, fw, fh = face_box
+    if fw <= 2 or fh <= 2:
+        return avatar_rgba
+
+    mask = np.zeros((h, w), dtype=np.uint8)
+    cx = int(fx + fw * 0.50)
+    cy = int(fy + fh * 0.52)
+    rx = max(8, int(fw * 0.72))
+    ry = max(10, int(fh * 0.92))
+
+    cv2.ellipse(mask, (cx, cy), (rx, ry), 0, 0, 360, 255, -1)
+    cv2.ellipse(mask, (cx, int(cy - fh * 0.40)), (max(6, int(rx * 0.72)), max(6, int(ry * 0.52))), 0, 0, 360, 255, -1)
+    mask = cv2.GaussianBlur(mask, (0, 0), max(2.0, fh * 0.12))
+
+    masked = avatar_rgba.copy()
+    alpha = masked[:, :, 3].astype(np.float32)
+    alpha_mask = mask.astype(np.float32) / 255.0
+    masked[:, :, 3] = np.clip(alpha * alpha_mask, 0, 255).astype(np.uint8)
+    return masked
+
+
 def choose_eye_pair(eyes: np.ndarray) -> Optional[Tuple[Tuple[int, int], Tuple[int, int]]]:
     if len(eyes) < 2:
         return None
@@ -1983,12 +2012,21 @@ def composite_avatar_face_swap(
 
     scale_mul = float(np.clip(avatar_scale, 0.6, 3.0))
 
+    scaled_face_box: Optional[Tuple[int, int, int, int]] = None
     if source_face_box is not None:
-        _, _, sfw, _ = source_face_box
+        sfx, sfy, sfw, sfh = source_face_box
         target_face_w = max(36, int(w * 0.95 * scale_mul))
         scale = target_face_w / max(1.0, float(sfw))
         patch_w = max(48, int(source_avatar.shape[1] * scale))
         patch_h = max(48, int(source_avatar.shape[0] * scale))
+        scale_x = patch_w / max(1.0, float(source_avatar.shape[1]))
+        scale_y = patch_h / max(1.0, float(source_avatar.shape[0]))
+        scaled_face_box = (
+            int(sfx * scale_x),
+            int(sfy * scale_y),
+            int(sfw * scale_x),
+            int(sfh * scale_y),
+        )
     else:
         patch_w = int(w * 0.95 * scale_mul)
         patch_h = int(h * (0.95 * scale_mul))
@@ -2002,6 +2040,8 @@ def composite_avatar_face_swap(
         eye_animation,
         mouth_animation,
     )
+    if scaled_face_box is not None:
+        animated_avatar = apply_face_only_alpha_mask(animated_avatar, scaled_face_box)
 
     canvas = np.zeros((animated_avatar.shape[0], animated_avatar.shape[1], 4), dtype=np.uint8)
     canvas = overlay_rgba(canvas, animated_avatar, 0, 0, patch_w, patch_h)
