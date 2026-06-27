@@ -1848,9 +1848,11 @@ def animate_avatar_features(
     if mouth_animation == "off":
         mouth = 0.0
     elif mouth_animation == "subtle":
-        mouth = float(np.clip((mouth_raw - 0.015) * 2.2, 0.0, 0.55))
+        mouth = float(np.clip((mouth_raw - 0.02) * 1.85, 0.0, 0.52))
     else:
-        mouth = float(np.clip((mouth_raw - 0.005) * 7.5, 0.0, 1.0))
+        mouth = float(np.clip((mouth_raw - 0.015) * 4.20, 0.0, 1.0))
+    # Smoothstep easing avoids abrupt mouth pops near threshold.
+    mouth = mouth * mouth * (3.0 - 2.0 * mouth)
 
     eye_box_w = max(12, int(w * 0.24))
     eye_box_h = max(10, int(h * 0.16))
@@ -1899,22 +1901,35 @@ def animate_avatar_features(
         upper = mouth_roi[:lip_line, :].copy()
         lower = mouth_roi[lip_line:, :].copy()
 
-        shift = max(1, int(roi_h * 0.56 * mouth))
+        # Move upper/lower lips apart and create a soft mouth cavity.
+        up_shift = max(1, int(roi_h * (0.06 + 0.10 * mouth)))
+        down_shift = max(1, int(roi_h * (0.10 + 0.26 * mouth)))
         modified = mouth_roi.copy()
-        modified[:lip_line, :] = upper
 
-        dst_start = min(roi_h - 1, lip_line + shift)
-        avail = min(lower.shape[0], roi_h - dst_start)
-        if avail > 0 and lower.size > 0:
-            modified[dst_start:dst_start + avail, :] = lower[:avail, :]
+        upper_h = upper.shape[0]
+        if upper_h > up_shift + 1:
+            modified[0 : upper_h - up_shift, :] = upper[up_shift:upper_h, :]
 
-        if dst_start > lip_line:
-            seam = mouth_roi[max(0, lip_line - 1):lip_line, :]
-            if seam.size > 0:
-                seam_fill = np.repeat(seam, dst_start - lip_line, axis=0)
-                modified[lip_line:dst_start, :] = seam_fill
+        lower_h = lower.shape[0]
+        dst_lower_start = min(roi_h - 1, lip_line + down_shift)
+        copy_h = min(lower_h, roi_h - dst_lower_start)
+        if copy_h > 0:
+            modified[dst_lower_start : dst_lower_start + copy_h, :] = lower[:copy_h, :]
 
-        # Blend with an ellipse mask to avoid rectangular mouth artifacts.
+        gap_top = max(0, lip_line - up_shift // 2)
+        gap_bottom = min(roi_h, dst_lower_start + max(1, int(roi_h * 0.03 * mouth)))
+        if gap_bottom > gap_top:
+            cavity = np.zeros((roi_h, roi_w), dtype=np.uint8)
+            cav_cx = roi_w // 2
+            cav_cy = (gap_top + gap_bottom) // 2
+            cav_rx = max(4, int(roi_w * (0.22 + 0.20 * mouth)))
+            cav_ry = max(2, int((gap_bottom - gap_top) * 0.55))
+            cv2.ellipse(cavity, (cav_cx, cav_cy), (cav_rx, cav_ry), 0, 0, 360, 255, -1)
+            cavity = cv2.GaussianBlur(cavity, (0, 0), max(1.0, roi_h * 0.10))
+            cav_alpha = (cavity.astype(np.float32) / 255.0)[:, :, None] * float(0.20 + 0.55 * mouth)
+            modified[:, :, :3] = np.clip(modified[:, :, :3].astype(np.float32) * (1.0 - cav_alpha), 0, 255).astype(np.uint8)
+
+        # Blend with a soft ellipse mask to avoid rectangular artifacts.
         mouth_mask = np.zeros((roi_h, roi_w), dtype=np.uint8)
         mask_cx = roi_w // 2
         mask_cy = min(roi_h - 1, lip_line + max(1, int(roi_h * (0.06 + 0.20 * mouth))))
@@ -1922,7 +1937,7 @@ def animate_avatar_features(
         mask_ry = max(2, int(roi_h * (0.18 + 0.26 * mouth)))
         cv2.ellipse(mouth_mask, (mask_cx, mask_cy), (mask_rx, mask_ry), 0, 0, 360, 255, -1)
         mouth_mask = cv2.GaussianBlur(mouth_mask, (0, 0), max(1.0, roi_h * 0.12))
-        blend_mask = (mouth_mask.astype(np.float32) / 255.0)[:, :, None] * float(np.clip(0.68 + mouth * 0.22, 0.68, 0.92))
+        blend_mask = (mouth_mask.astype(np.float32) / 255.0)[:, :, None] * float(np.clip(0.62 + mouth * 0.22, 0.62, 0.88))
 
         mixed = mouth_roi.astype(np.float32) * (1.0 - blend_mask) + modified.astype(np.float32) * blend_mask
         mixed_u8 = np.clip(mixed, 0, 255).astype(np.uint8)
