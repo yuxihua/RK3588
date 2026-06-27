@@ -114,6 +114,15 @@ GPIO 选择头像（GPIO0/GPIO1 两位共四种）：
 
 `/ui` 页面支持实时调整 `render_mode`、`beauty_strength`、`avatar_scale`、`mouth_x_offset`、`mouth_y_offset`、`detect_every`、`network_jpeg_quality`，提交后立即生效。
 
+现在美颜还可以选预设和细项：
+
+- 美颜预设：`natural`、`soft`、`bright`、`clear`、`glow`
+- 磨皮：`skin_smoothness`
+- 提亮：`skin_brightness`
+- 锐化：`skin_sharpen`
+
+如果你想要更明显的美颜效果，通常先选 `bright` 或 `glow`，再把 `beauty_strength` 和 `skin_brightness` 往上调一点。
+
 如果你的设备号不同，可以在页面里改。
 
 GPIO 引脚和头像映射可在 `/etc/default/avatar-gateway` 修改，例如：

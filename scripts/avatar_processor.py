@@ -53,7 +53,11 @@ class TrackingState:
 @dataclass
 class RuntimeSettings:
     render_mode: str = "beauty"
+    beauty_preset: str = "natural"
     beauty_strength: float = 0.45
+    skin_smoothness: float = 0.45
+    skin_brightness: float = 0.10
+    skin_sharpen: float = 0.10
     background_mode: str = "camera"
     avatar_scale: float = 1.0
     eye_animation: str = "subtle"
@@ -69,7 +73,11 @@ class RuntimeSettings:
         with self._lock:
             return {
                 "render_mode": self.render_mode,
+                "beauty_preset": self.beauty_preset,
                 "beauty_strength": self.beauty_strength,
+                "skin_smoothness": self.skin_smoothness,
+                "skin_brightness": self.skin_brightness,
+                "skin_sharpen": self.skin_sharpen,
                 "background_mode": self.background_mode,
                 "avatar_scale": self.avatar_scale,
                 "eye_animation": self.eye_animation,
@@ -83,13 +91,37 @@ class RuntimeSettings:
 
     def update_from_dict(self, updates: Dict[str, object]) -> Dict[str, object]:
         applied: Dict[str, object] = {}
+        preset_map: Dict[str, Dict[str, float]] = {
+            "natural": {"skin_smoothness": 0.35, "skin_brightness": 0.05, "skin_sharpen": 0.08},
+            "soft": {"skin_smoothness": 0.62, "skin_brightness": 0.08, "skin_sharpen": 0.04},
+            "bright": {"skin_smoothness": 0.45, "skin_brightness": 0.18, "skin_sharpen": 0.06},
+            "clear": {"skin_smoothness": 0.42, "skin_brightness": 0.10, "skin_sharpen": 0.22},
+            "glow": {"skin_smoothness": 0.55, "skin_brightness": 0.16, "skin_sharpen": 0.10},
+        }
         with self._lock:
             if "render_mode" in updates and str(updates["render_mode"]) in {"beauty", "avatar"}:
                 self.render_mode = str(updates["render_mode"])
                 applied["render_mode"] = self.render_mode
+            if "beauty_preset" in updates:
+                preset_name = str(updates["beauty_preset"])
+                if preset_name in preset_map:
+                    self.beauty_preset = preset_name
+                    applied["beauty_preset"] = self.beauty_preset
+                    for key, value in preset_map[preset_name].items():
+                        setattr(self, key, float(value))
+                        applied[key] = getattr(self, key)
             if "beauty_strength" in updates:
                 self.beauty_strength = float(np.clip(float(updates["beauty_strength"]), 0.0, 1.0))
                 applied["beauty_strength"] = self.beauty_strength
+            if "skin_smoothness" in updates:
+                self.skin_smoothness = float(np.clip(float(updates["skin_smoothness"]), 0.0, 1.0))
+                applied["skin_smoothness"] = self.skin_smoothness
+            if "skin_brightness" in updates:
+                self.skin_brightness = float(np.clip(float(updates["skin_brightness"]), 0.0, 1.0))
+                applied["skin_brightness"] = self.skin_brightness
+            if "skin_sharpen" in updates:
+                self.skin_sharpen = float(np.clip(float(updates["skin_sharpen"]), 0.0, 1.0))
+                applied["skin_sharpen"] = self.skin_sharpen
             if "background_mode" in updates and str(updates["background_mode"]) in {"camera", "virtual"}:
                 self.background_mode = str(updates["background_mode"])
                 applied["background_mode"] = self.background_mode
@@ -559,9 +591,13 @@ class NetworkMjpegWriter:
 <body>
     <div class=\"wrap\">
         <div class=\"card\"><img src=\"{stream_src}\" alt=\"stream\" /></div>
-        <div class=\"card\">
+        <div class="card">
+            <div class="row"><label>美颜预设</label><select id="beauty_preset"><option value="natural">自然</option><option value="soft">柔和</option><option value="bright">提亮</option><option value="clear">清透</option><option value="glow">焕肤</option></select></div>
             <div class=\"row\"><label>渲染模式</label><select id=\"render_mode\"><option value=\"beauty\">beauty</option><option value=\"avatar\">avatar</option></select></div>
             <div class=\"row\"><label>美颜强度 (0-1)</label><input id=\"beauty_strength\" type=\"number\" min=\"0\" max=\"1\" step=\"0.01\" /></div>
+            <div class="row"><label>磨皮</label><input id="skin_smoothness" type="range" min="0" max="1" step="0.01" /></div>
+            <div class="row"><label>提亮</label><input id="skin_brightness" type="range" min="0" max="1" step="0.01" /></div>
+            <div class="row"><label>锐化</label><input id="skin_sharpen" type="range" min="0" max="1" step="0.01" /></div>
             <div class=\"row\"><label>头像缩放</label><input id=\"avatar_scale\" type=\"number\" min=\"0.6\" max=\"3\" step=\"0.01\" /></div>
             <div class=\"row\"><label>口型上下偏移</label><input id=\"mouth_y_offset\" type=\"number\" min=\"-0.3\" max=\"0.3\" step=\"0.01\" /></div>
             <div class=\"row\"><label>口型左右偏移</label><input id=\"mouth_x_offset\" type=\"number\" min=\"-0.3\" max=\"0.3\" step=\"0.01\" /></div>
@@ -572,11 +608,17 @@ class NetworkMjpegWriter:
         </div>
     </div>
     <script>
-        const ids = ["render_mode","beauty_strength","avatar_scale","mouth_y_offset","mouth_x_offset","detect_every","network_jpeg_quality"];
+        const ids = ["beauty_preset","render_mode","beauty_strength","skin_smoothness","skin_brightness","skin_sharpen","avatar_scale","mouth_y_offset","mouth_x_offset","detect_every","network_jpeg_quality"];
+        const sliderIds = ["skin_smoothness","skin_brightness","skin_sharpen"];
         async function load() {{
             const r = await fetch("{writer.settings_path}");
             const d = await r.json();
             for (const id of ids) {{ if (d[id] !== undefined) document.getElementById(id).value = d[id]; }}
+            for (const id of sliderIds) {{
+                const el = document.getElementById(id);
+                if (el) el.title = el.value;
+                if (el) el.addEventListener('input', () => {{ el.title = el.value; }});
+            }}
             document.getElementById('tip').textContent = '已连接，可实时调参';
         }}
         async function apply() {{
@@ -2447,7 +2489,14 @@ def composite_avatar(
     return overlay_rgba(frame, canvas, out_x, out_y, canvas_w, canvas_h)
 
 
-def beautify_with_face(frame: np.ndarray, face: Tuple[int, int, int, int], strength: float) -> np.ndarray:
+def beautify_with_face(
+    frame: np.ndarray,
+    face: Tuple[int, int, int, int],
+    strength: float,
+    skin_smoothness: float,
+    skin_brightness: float,
+    skin_sharpen: float,
+) -> np.ndarray:
     x, y, w, h = face
     frame_h, frame_w = frame.shape[:2]
 
@@ -2461,8 +2510,25 @@ def beautify_with_face(frame: np.ndarray, face: Tuple[int, int, int, int], stren
         return frame
 
     roi = frame[y1:y2, x1:x2].copy()
-    smoothed = cv2.bilateralFilter(roi, d=7, sigmaColor=40, sigmaSpace=40)
-    enhanced = cv2.addWeighted(roi, 1.18, smoothed, -0.18, 0)
+    smooth_amount = float(np.clip(skin_smoothness, 0.0, 1.0))
+    bright_amount = float(np.clip(skin_brightness, 0.0, 1.0))
+    sharpen_amount = float(np.clip(skin_sharpen, 0.0, 1.0))
+
+    smooth_d = 5 + int(6 * smooth_amount)
+    smoothed = cv2.bilateralFilter(
+        roi,
+        d=smooth_d,
+        sigmaColor=32 + 48 * smooth_amount,
+        sigmaSpace=32 + 48 * smooth_amount,
+    )
+    softened = cv2.addWeighted(roi, 1.0 - 0.55 * smooth_amount, smoothed, 0.55 * smooth_amount, 0)
+    brightened = cv2.convertScaleAbs(softened, alpha=1.0 + 0.16 * bright_amount, beta=12.0 * bright_amount)
+
+    if sharpen_amount > 0.0:
+        blur = cv2.GaussianBlur(brightened, (0, 0), 1.0 + 0.8 * sharpen_amount)
+        enhanced = cv2.addWeighted(brightened, 1.0 + 0.55 * sharpen_amount, blur, -0.55 * sharpen_amount, 0)
+    else:
+        enhanced = brightened
 
     roi_h, roi_w = roi.shape[:2]
     mask = np.zeros((roi_h, roi_w), dtype=np.uint8)
@@ -2478,7 +2544,7 @@ def beautify_with_face(frame: np.ndarray, face: Tuple[int, int, int, int], stren
 
     ycrcb = cv2.cvtColor(np.clip(blended, 0, 255).astype(np.uint8), cv2.COLOR_BGR2YCrCb)
     y_channel = ycrcb[:, :, 0].astype(np.float32)
-    y_channel = np.clip(y_channel + 8.0 * alpha[:, :, 0], 0, 255)
+    y_channel = np.clip(y_channel + (6.0 + 10.0 * bright_amount) * alpha[:, :, 0], 0, 255)
     ycrcb[:, :, 0] = y_channel.astype(np.uint8)
     out_roi = cv2.cvtColor(ycrcb, cv2.COLOR_YCrCb2BGR)
 
@@ -2496,6 +2562,9 @@ def process_frame(
     profile_cascade: Optional[cv2.CascadeClassifier],
     render_mode: str,
     beauty_strength: float,
+    skin_smoothness: float,
+    skin_brightness: float,
+    skin_sharpen: float,
     fallback_style: str,
     background_mode: str,
     avatar_scale: float,
@@ -2514,6 +2583,9 @@ def process_frame(
         cfg = runtime_settings.snapshot()
         render_mode = str(cfg.get("render_mode", render_mode))
         beauty_strength = float(cfg.get("beauty_strength", beauty_strength))
+        skin_smoothness = float(cfg.get("skin_smoothness", skin_smoothness))
+        skin_brightness = float(cfg.get("skin_brightness", skin_brightness))
+        skin_sharpen = float(cfg.get("skin_sharpen", skin_sharpen))
         background_mode = str(cfg.get("background_mode", background_mode))
         avatar_scale = float(cfg.get("avatar_scale", avatar_scale))
         eye_animation = str(cfg.get("eye_animation", eye_animation))
@@ -2531,7 +2603,7 @@ def process_frame(
         state = estimate_pose(frame, face_cascade, eye_cascade, mouth_cascade, profile_cascade) if must_detect else None
         if state is not None:
             state = update_tracking(state, now)
-            return beautify_with_face(frame, state.face, beauty_strength)
+            return beautify_with_face(frame, state.face, beauty_strength, skin_smoothness, skin_brightness, skin_sharpen)
 
         if TRACKING_STATE.face is not None and (now - TRACKING_STATE.last_face_at) <= 0.32:
             smoothed_face = TRACKING_STATE.face
@@ -2541,7 +2613,7 @@ def process_frame(
                 int(smoothed_face[2]),
                 int(smoothed_face[3]),
             )
-            return beautify_with_face(frame, tracked_face, beauty_strength * 0.9)
+            return beautify_with_face(frame, tracked_face, beauty_strength * 0.9, skin_smoothness, skin_brightness, skin_sharpen)
 
         return frame
 
@@ -2631,7 +2703,11 @@ def main() -> int:
     spec = FrameSpec(width=args.width, height=args.height, fps=args.fps)
     runtime_settings = RuntimeSettings(
         render_mode=args.render_mode,
+        beauty_preset="natural",
         beauty_strength=float(args.beauty_strength),
+        skin_smoothness=0.45,
+        skin_brightness=0.10,
+        skin_sharpen=0.10,
         background_mode=args.background_mode,
         avatar_scale=float(args.avatar_scale),
         eye_animation=args.eye_animation,
@@ -2718,6 +2794,9 @@ def main() -> int:
                 profile_cascade,
                 args.render_mode,
                 args.beauty_strength,
+                0.45,
+                0.10,
+                0.10,
                 args.fallback_style,
                 args.background_mode,
                 args.avatar_scale,
