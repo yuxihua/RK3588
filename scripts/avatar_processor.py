@@ -2123,7 +2123,7 @@ def composite_avatar_face_swap(
     mouth_anchor: Optional[Tuple[float, float]] = None
     if source_face_box is not None:
         sfx, sfy, sfw, sfh = source_face_box
-        target_face_w = max(40, int(w * 1.18 * scale_mul))
+        target_face_w = max(38, int(w * 1.03 * scale_mul))
         scale = target_face_w / max(1.0, float(sfw))
         patch_w = max(48, int(source_avatar.shape[1] * scale))
         patch_h = max(48, int(source_avatar.shape[0] * scale))
@@ -2138,11 +2138,11 @@ def composite_avatar_face_swap(
         afx, afy, afw, afh = scaled_face_box
         mouth_anchor = (
             (afx + afw * 0.50) / max(1.0, float(patch_w)),
-            (afy + afh * 0.72) / max(1.0, float(patch_h)),
+            (afy + afh * 0.66) / max(1.0, float(patch_h)),
         )
     else:
-        patch_w = int(w * 1.18 * scale_mul)
-        patch_h = int(h * (1.18 * scale_mul))
+        patch_w = int(w * 1.03 * scale_mul)
+        patch_h = int(h * (1.03 * scale_mul))
 
     resized_avatar = cv2.resize(source_avatar, (patch_w, patch_h), interpolation=cv2.INTER_AREA)
     blink_level = max(TRACKING_STATE.blink_progress, 1.0 - state.eye_open)
