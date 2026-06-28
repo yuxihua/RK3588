@@ -506,13 +506,58 @@ def load_cascade_optional(filename: str) -> Optional[cv2.CascadeClassifier]:
     return cascade
 
 
-def list_video_sources(limit: int = 12) -> list[str]:
-    sources: list[str] = []
+def list_video_sources(limit: int = 12) -> list[Dict[str, str]]:
+    alias_map: Dict[str, list[str]] = {}
+    by_id_dir = Path("/dev/v4l/by-id")
+    if by_id_dir.is_dir():
+        for alias in sorted(by_id_dir.iterdir()):
+            try:
+                target = str(alias.resolve())
+            except OSError:
+                continue
+            alias_map.setdefault(target, []).append(alias.name)
+
+    entries: list[Dict[str, str]] = []
     for idx in range(max(1, int(limit))):
         node = f"/dev/video{idx}"
-        if Path(node).exists():
-            sources.append(node)
-    return sources
+        node_path = Path(node)
+        if not node_path.exists():
+            continue
+
+        sys_name = Path(f"/sys/class/video4linux/video{idx}/name")
+        display_name = ""
+        try:
+            if sys_name.exists():
+                display_name = sys_name.read_text(encoding="utf-8", errors="ignore").strip()
+        except OSError:
+            display_name = ""
+
+        aliases = alias_map.get(str(node_path.resolve()), [])
+        label_parts = [node]
+        if display_name:
+            label_parts.append(display_name)
+        if aliases:
+            label_parts.append(" / ".join(aliases[:2]))
+
+        priority = 2
+        lower_name = display_name.lower()
+        if aliases:
+            priority = 0
+        elif any(keyword in lower_name for keyword in ["camera", "webcam", "usb", "uvc"]):
+            priority = 1
+        elif any(keyword in lower_name for keyword in ["metadata", "codec", "isp", "stat", "subdev"]):
+            priority = 4
+
+        entries.append(
+            {
+                "value": node,
+                "label": " | ".join(label_parts),
+                "priority": str(priority),
+            }
+        )
+
+    entries.sort(key=lambda item: (int(item.get("priority", "9")), item["value"]))
+    return entries
 
 
 def create_capture(device: str, spec: FrameSpec) -> Tuple[cv2.VideoCapture, str]:
@@ -762,11 +807,11 @@ class NetworkMjpegWriter:
             select.innerHTML = '';
             for (const src of list) {{
                 const opt = document.createElement('option');
-                opt.value = src;
-                opt.textContent = src;
+                opt.value = src.value;
+                opt.textContent = src.label || src.value;
                 select.appendChild(opt);
             }}
-            if (selected && list.includes(selected)) select.value = selected;
+            if (selected) select.value = selected;
         }}
         async function load() {{
             const r = await fetch("{writer.settings_path}");
@@ -811,7 +856,13 @@ class NetworkMjpegWriter:
                     selected = ""
                     if writer.runtime_settings is not None:
                         selected = str(writer.runtime_settings.snapshot().get("camera_device", ""))
-                    _send_json(self, {"sources": list_video_sources(), "selected": selected}, 200)
+                    sources = list_video_sources()
+                    for item in sources:
+                        if item.get("value") == selected:
+                            item["label"] = f"[当前] {item.get('label', item.get('value', ''))}"
+                            item["priority"] = "-1"
+                    sources.sort(key=lambda item: (int(item.get("priority", "9")), item.get("value", "")))
+                    _send_json(self, {"sources": sources, "selected": selected}, 200)
                     return
 
                 if parsed.path == writer.settings_path:
