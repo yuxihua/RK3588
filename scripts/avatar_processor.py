@@ -506,7 +506,7 @@ def load_cascade_optional(filename: str) -> Optional[cv2.CascadeClassifier]:
     return cascade
 
 
-def list_video_sources(limit: int = 12) -> list[Dict[str, str]]:
+def list_video_sources(limit: int = 0) -> list[Dict[str, str]]:
     alias_map: Dict[str, list[str]] = {}
     by_id_dir = Path("/dev/v4l/by-id")
     if by_id_dir.is_dir():
@@ -518,11 +518,21 @@ def list_video_sources(limit: int = 12) -> list[Dict[str, str]]:
             alias_map.setdefault(target, []).append(alias.name)
 
     entries: list[Dict[str, str]] = []
-    for idx in range(max(1, int(limit))):
-        node = f"/dev/video{idx}"
-        node_path = Path(node)
-        if not node_path.exists():
+    nodes: list[Path] = []
+    for node_path in sorted(Path("/dev").glob("video*")):
+        name = node_path.name
+        if not name.startswith("video"):
             continue
+        suffix = name[5:]
+        if not suffix.isdigit():
+            continue
+        nodes.append(node_path)
+
+    # Keep all sources by default; optional positive limit only for debugging.
+    use_limit = int(limit) if int(limit) > 0 else len(nodes)
+    for node_path in nodes[:use_limit]:
+        node = str(node_path)
+        idx = int(node_path.name[5:])
 
         sys_name = Path(f"/sys/class/video4linux/video{idx}/name")
         display_name = ""
@@ -556,7 +566,7 @@ def list_video_sources(limit: int = 12) -> list[Dict[str, str]]:
             }
         )
 
-    entries.sort(key=lambda item: (int(item.get("priority", "9")), item["value"]))
+    entries.sort(key=lambda item: (int(item.get("priority", "9")), int(item["value"].replace("/dev/video", ""))))
     return entries
 
 
