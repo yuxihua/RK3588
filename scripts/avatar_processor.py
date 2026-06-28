@@ -552,6 +552,15 @@ def create_capture(device: str, spec: FrameSpec) -> Tuple[cv2.VideoCapture, str]
     raise RuntimeError(f"无法打开输入摄像头: {device}; tried={','.join(tried)}")
 
 
+def create_status_frame(spec: FrameSpec, title: str, detail: str = "") -> np.ndarray:
+    frame = np.zeros((spec.height, spec.width, 3), dtype=np.uint8)
+    frame[:, :] = (10, 16, 32)
+    cv2.putText(frame, title, (32, max(48, spec.height // 2 - 12)), cv2.FONT_HERSHEY_SIMPLEX, 0.95, (220, 235, 255), 2, cv2.LINE_AA)
+    if detail:
+        cv2.putText(frame, detail[: max(16, min(96, len(detail)))], (32, max(84, spec.height // 2 + 26)), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (140, 175, 220), 1, cv2.LINE_AA)
+    return frame
+
+
 class FfmpegPipeWriter:
     def __init__(self, process: subprocess.Popen[bytes], device: str, spec: FrameSpec):
         self.process = process
