@@ -52,6 +52,7 @@ class TrackingState:
 
 @dataclass
 class RuntimeSettings:
+    camera_device: str = "/dev/video0"
     render_mode: str = "beauty"
     beauty_preset: str = "natural"
     beauty_strength: float = 0.45
@@ -84,6 +85,7 @@ class RuntimeSettings:
     def snapshot(self) -> Dict[str, object]:
         with self._lock:
             return {
+                "camera_device": self.camera_device,
                 "render_mode": self.render_mode,
                 "beauty_preset": self.beauty_preset,
                 "beauty_strength": self.beauty_strength,
@@ -123,6 +125,11 @@ class RuntimeSettings:
             "glow": {"skin_smoothness": 0.55, "skin_brightness": 0.16, "skin_sharpen": 0.10, "face_slim": 0.15, "eye_enlarge": 0.22, "nose_highlight": 0.18, "mouth_size": 0.12, "lip_color": 0.15},
         }
         with self._lock:
+            if "camera_device" in updates:
+                camera_text = str(updates["camera_device"]).strip()
+                if camera_text.startswith("/dev/video"):
+                    self.camera_device = camera_text
+                    applied["camera_device"] = self.camera_device
             if "render_mode" in updates and str(updates["render_mode"]) in {"beauty", "avatar"}:
                 self.render_mode = str(updates["render_mode"])
                 applied["render_mode"] = self.render_mode
@@ -499,16 +506,50 @@ def load_cascade_optional(filename: str) -> Optional[cv2.CascadeClassifier]:
     return cascade
 
 
-def create_capture(device: str, spec: FrameSpec) -> cv2.VideoCapture:
-    capture = cv2.VideoCapture(device, cv2.CAP_V4L2)
-    if not capture.isOpened():
-        raise RuntimeError(f"无法打开输入摄像头: {device}")
+def list_video_sources(limit: int = 12) -> list[str]:
+    sources: list[str] = []
+    for idx in range(max(1, int(limit))):
+        node = f"/dev/video{idx}"
+        if Path(node).exists():
+            sources.append(node)
+    return sources
 
-    capture.set(cv2.CAP_PROP_FRAME_WIDTH, spec.width)
-    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, spec.height)
-    capture.set(cv2.CAP_PROP_FPS, spec.fps)
-    capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-    return capture
+
+def create_capture(device: str, spec: FrameSpec) -> Tuple[cv2.VideoCapture, str]:
+    candidates = [device]
+    if str(device).startswith("/dev/video"):
+        for idx in range(10):
+            alt = f"/dev/video{idx}"
+            if alt not in candidates and Path(alt).exists():
+                candidates.append(alt)
+
+    tried: list[str] = []
+    for candidate in candidates:
+        capture = cv2.VideoCapture(candidate, cv2.CAP_V4L2)
+        if not capture.isOpened():
+            tried.append(candidate)
+            continue
+
+        capture.set(cv2.CAP_PROP_FRAME_WIDTH, spec.width)
+        capture.set(cv2.CAP_PROP_FRAME_HEIGHT, spec.height)
+        capture.set(cv2.CAP_PROP_FPS, spec.fps)
+        capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+        ok = False
+        for _ in range(3):
+            frame_ok, frame = capture.read()
+            if frame_ok and frame is not None and frame.size > 0:
+                ok = True
+                break
+            time.sleep(0.02)
+
+        if ok:
+            return capture, candidate
+
+        capture.release()
+        tried.append(candidate)
+
+    raise RuntimeError(f"无法打开输入摄像头: {device}; tried={','.join(tried)}")
 
 
 class FfmpegPipeWriter:
@@ -613,6 +654,7 @@ class NetworkMjpegWriter:
         self.runtime_settings = runtime_settings
         self.ui_path = "/ui"
         self.settings_path = "/api/settings"
+        self.video_sources_path = "/api/video-sources"
 
         self._lock = threading.Condition()
         self._jpeg_frame: Optional[bytes] = None
@@ -656,6 +698,7 @@ class NetworkMjpegWriter:
     <div class=\"wrap\">
         <div class="card"><img src="{stream_src}" alt="stream" /></div>
         <div class="card">
+            <div class="row"><label>视频源</label><select id="camera_device"></select></div>
             <div class="row"><label>美颜预设</label><select id="beauty_preset"><option value="natural">自然</option><option value="soft">柔和</option><option value="bright">提亮</option><option value="clear">清透</option><option value="glow">焕肤</option></select></div>
             <div class="row"><label>渲染模式</label><select id="render_mode"><option value="beauty">beauty</option><option value="avatar">avatar</option></select></div>
             <div class="row"><label>美颜强度 (0-1)</label><input id="beauty_strength" type="number" min="0" max="1" step="0.01" /></div>
@@ -700,11 +743,26 @@ class NetworkMjpegWriter:
         </div>
     </div>
     <script>
-        const ids = ["beauty_preset","render_mode","beauty_strength","skin_smoothness","skin_brightness","skin_sharpen","face_slim","face_round","eye_enlarge","eye_spacing","eyebrow_height","eyebrow_angle","nose_bridge","nose_highlight","mouth_size","lip_color","body_slim","filter_style","avatar_scale","mouth_y_offset","mouth_x_offset","detect_every","network_jpeg_quality"];
+        const ids = ["camera_device","beauty_preset","render_mode","beauty_strength","skin_smoothness","skin_brightness","skin_sharpen","face_slim","face_round","eye_enlarge","eye_spacing","eyebrow_height","eyebrow_angle","nose_bridge","nose_highlight","mouth_size","lip_color","body_slim","filter_style","avatar_scale","mouth_y_offset","mouth_x_offset","detect_every","network_jpeg_quality"];
         const sliderIds = ["skin_smoothness","skin_brightness","skin_sharpen","face_slim","face_round","eye_enlarge","eye_spacing","eyebrow_height","eyebrow_angle","nose_bridge","nose_highlight","mouth_size","lip_color","body_slim"];
+        async function loadVideoSources(selected) {{
+            const select = document.getElementById('camera_device');
+            const r = await fetch("{writer.video_sources_path}");
+            const d = await r.json();
+            const list = Array.isArray(d.sources) ? d.sources : [];
+            select.innerHTML = '';
+            for (const src of list) {{
+                const opt = document.createElement('option');
+                opt.value = src;
+                opt.textContent = src;
+                select.appendChild(opt);
+            }}
+            if (selected && list.includes(selected)) select.value = selected;
+        }}
         async function load() {{
             const r = await fetch("{writer.settings_path}");
             const d = await r.json();
+            await loadVideoSources(d.camera_device);
             for (const id of ids) {{ if (d[id] !== undefined) document.getElementById(id).value = d[id]; }}
             for (const id of sliderIds) {{
                 const el = document.getElementById(id);
@@ -740,6 +798,13 @@ class NetworkMjpegWriter:
         class MjpegHandler(http_server.BaseHTTPRequestHandler):
             def do_GET(self):  # noqa: N802
                 parsed = urlparse(self.path)
+                if parsed.path == writer.video_sources_path:
+                    selected = ""
+                    if writer.runtime_settings is not None:
+                        selected = str(writer.runtime_settings.snapshot().get("camera_device", ""))
+                    _send_json(self, {"sources": list_video_sources(), "selected": selected}, 200)
+                    return
+
                 if parsed.path == writer.settings_path:
                     if writer.runtime_settings is None:
                         _send_json(self, {"error": "runtime settings unavailable"}, 503)
@@ -3046,6 +3111,7 @@ def main() -> int:
     args = build_parser().parse_args()
     spec = FrameSpec(width=args.width, height=args.height, fps=args.fps)
     runtime_settings = RuntimeSettings(
+        camera_device=str(args.camera),
         render_mode=args.render_mode,
         beauty_preset="natural",
         beauty_strength=float(args.beauty_strength),
@@ -3100,10 +3166,10 @@ def main() -> int:
     eye_cascade = load_cascade("haarcascade_eye_tree_eyeglasses.xml")
     mouth_cascade = load_cascade("haarcascade_smile.xml")
 
-    capture = create_capture(args.camera, spec)
+    capture, active_camera = create_capture(args.camera, spec)
     writer, output_spec, output_desc = create_output_writer(args, spec, runtime_settings)
 
-    print(f"camera={args.camera}")
+    print(f"camera={active_camera}")
     print(f"render_mode={args.render_mode}")
     print(f"output_mode={args.output_mode}")
     print(f"output={output_desc}")
@@ -3128,11 +3194,40 @@ def main() -> int:
 
     try:
         frame_delay = 1.0 / max(spec.fps, 1)
+        read_failures = 0
         while not STOP_REQUESTED:
+            selected_camera = str(runtime_settings.snapshot().get("camera_device", active_camera))
+            if selected_camera != active_camera:
+                try:
+                    new_capture, new_active_camera = create_capture(selected_camera, spec)
+                    capture.release()
+                    capture = new_capture
+                    active_camera = new_active_camera
+                    read_failures = 0
+                    print(f"camera_switched={active_camera}")
+                    sys.stdout.flush()
+                except Exception as exc:
+                    print(f"camera_switch_error={exc}")
+                    sys.stdout.flush()
+
             ok, frame = capture.read()
             if not ok or frame is None:
+                read_failures += 1
+                if read_failures >= 12:
+                    try:
+                        capture.release()
+                    except Exception:
+                        pass
+                    try:
+                        capture, active_camera = create_capture(selected_camera, spec)
+                        print(f"camera_recovered={active_camera}")
+                        sys.stdout.flush()
+                        read_failures = 0
+                    except Exception:
+                        pass
                 time.sleep(0.01)
                 continue
+            read_failures = 0
 
             frame = cv2.resize(frame, (spec.width, spec.height), interpolation=cv2.INTER_AREA)
             if args.mirror:

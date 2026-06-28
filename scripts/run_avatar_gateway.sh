@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
-CAMERA="${CAMERA:-/dev/video41}"
+CAMERA="${CAMERA:-/dev/video0}"
 RENDER_MODE="${RENDER_MODE:-beauty}"
 OUTPUT_MODE="${OUTPUT_MODE:-network}"
 OUTPUT_DEVICE="${OUTPUT_DEVICE:-/dev/video43}"
@@ -52,7 +52,34 @@ resolve_avatar_fallback() {
 	echo "$ROOT_DIR/assets/avatar.png"
 }
 
+resolve_camera_device() {
+	local requested="$1"
+	if [[ -n "$requested" && -e "$requested" ]]; then
+		echo "$requested"
+		return 0
+	fi
+
+	local byid
+	for byid in /dev/v4l/by-id/*-video-index0; do
+		if [[ -e "$byid" ]]; then
+			readlink -f "$byid"
+			return 0
+		fi
+	done
+
+	local candidate
+	for candidate in /dev/video0 /dev/video1 /dev/video2 /dev/video3 /dev/video4 /dev/video5 /dev/video6 /dev/video7 /dev/video8 /dev/video9; do
+		if [[ -e "$candidate" ]]; then
+			echo "$candidate"
+			return 0
+		fi
+	done
+
+	echo "$requested"
+}
+
 AVATAR_FALLBACK_PATH="$(resolve_avatar_fallback)"
+CAMERA="$(resolve_camera_device "$CAMERA")"
 
 ARGS=(
 	--camera "$CAMERA"

@@ -112,7 +112,7 @@ GPIO 选择头像（GPIO0/GPIO1 两位共四种）：
 - 控制页面：`http://<板子IP>:8080/ui`
 - 设置接口：`GET/POST http://<板子IP>:8080/api/settings`
 
-`/ui` 页面支持实时调整 `render_mode`、`beauty_strength`、`avatar_scale`、`mouth_x_offset`、`mouth_y_offset`、`detect_every`、`network_jpeg_quality`，提交后立即生效。
+`/ui` 页面支持实时调整 `camera_device`（视频源）、`render_mode`、`beauty_strength`、`avatar_scale`、`mouth_x_offset`、`mouth_y_offset`、`detect_every`、`network_jpeg_quality`，提交后立即生效。
 
 现在美颜还可以选预设和细项：
 
