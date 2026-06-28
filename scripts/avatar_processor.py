@@ -2042,6 +2042,26 @@ def detect_face(
                 x, y, w, h = (int(value) for value in face)
                 candidates.append(_rescale_box((x + roi_x1, y + roi_y1, w, h), scale))
 
+            # Occlusion recovery: detect from upper-face only and expand back to full-face box.
+            roi_h = roi_gray.shape[0]
+            upper_h = max(min_side, int(roi_h * 0.78))
+            roi_upper = roi_gray[:upper_h, :]
+            partial_faces = cascade.detectMultiScale(
+                roi_upper,
+                scaleFactor=1.06,
+                minNeighbors=2,
+                minSize=(max(22, int(tracked_min_side * 0.72)), max(22, int(tracked_min_side * 0.72))),
+            )
+            for face in partial_faces:
+                fx, fy, fw, fh = (int(value) for value in face)
+                ex = fx
+                ey = max(0, fy - int(fh * 0.18))
+                ew = fw
+                eh = min(roi_h - ey, int(fh * 1.55))
+                if ew < min_side // 2 or eh < min_side // 2:
+                    continue
+                candidates.append(_rescale_box((ex + roi_x1, ey + roi_y1, ew, eh), scale))
+
     if len(candidates) == 0:
         equalized = cv2.equalizeHist(gray)
         recovery_faces = cascade.detectMultiScale(
@@ -2061,15 +2081,20 @@ def detect_face(
         prev_cx = px + pw * 0.5
         prev_cy = py + ph * 0.5
         ref = max(1.0, pw, ph)
+        prev_area = max(1.0, pw * ph)
 
         def score(candidate: Tuple[int, int, int, int]) -> float:
             x, y, w, h = candidate
             area = float(w * h)
+            size_ratio = area / prev_area
+            if size_ratio < 0.28:
+                return -1.0
             cx = x + w * 0.5
             cy = y + h * 0.5
             dist = float(np.hypot(cx - prev_cx, cy - prev_cy))
             dist_norm = dist / ref
-            return area / (1.0 + 1.8 * dist_norm * dist_norm)
+            size_weight = 1.0 if size_ratio >= 0.42 else 0.30
+            return area * size_weight / (1.0 + 1.8 * dist_norm * dist_norm)
 
         best = max(candidates, key=score)
         return tuple(int(value) for value in best)
@@ -2875,9 +2900,10 @@ def process_frame(
         max_faces = int(cfg.get("max_faces", max_faces))
         detect_every = int(cfg.get("detect_every", detect_every))
 
-    detect_stride = max(1, int(detect_every))
-    must_detect = TRACKING_STATE.face is None or (FRAME_COUNTER % detect_stride == 0)
     now = time.monotonic()
+    detect_stride = max(1, int(detect_every))
+    lost_for = now - float(TRACKING_STATE.last_face_at)
+    must_detect = TRACKING_STATE.face is None or (FRAME_COUNTER % detect_stride == 0) or (lost_for > 0.18)
 
     if render_mode == "beauty":
         state = estimate_pose(frame, face_cascade, eye_cascade, mouth_cascade, profile_cascade) if must_detect else None
@@ -2904,7 +2930,7 @@ def process_frame(
                 filter_style,
             )
 
-        if TRACKING_STATE.face is not None and (now - TRACKING_STATE.last_face_at) <= 0.32:
+        if TRACKING_STATE.face is not None and (now - TRACKING_STATE.last_face_at) <= 0.95:
             smoothed_face = TRACKING_STATE.face
             tracked_face = (
                 int(smoothed_face[0]),
@@ -2984,7 +3010,7 @@ def process_frame(
     if state is not None:
         state = update_tracking(state, now)
     else:
-        if TRACKING_STATE.face is not None and (now - TRACKING_STATE.last_face_at) <= 0.42:
+        if TRACKING_STATE.face is not None and (now - TRACKING_STATE.last_face_at) <= 1.35:
             smoothed_face = TRACKING_STATE.face
             state = FaceState(
                 face=(
@@ -2994,7 +3020,7 @@ def process_frame(
                     int(smoothed_face[3]),
                 ),
                 angle=TRACKING_STATE.angle,
-                mouth_open=TRACKING_STATE.mouth_open * 0.90,
+                mouth_open=TRACKING_STATE.mouth_open * 0.84,
                 eye_open=max(0.75, TRACKING_STATE.eye_open),
             )
         else:
