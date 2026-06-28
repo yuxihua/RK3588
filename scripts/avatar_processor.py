@@ -3175,8 +3175,14 @@ def main() -> int:
     eye_cascade = load_cascade("haarcascade_eye_tree_eyeglasses.xml")
     mouth_cascade = load_cascade("haarcascade_smile.xml")
 
-    capture, active_camera = create_capture(args.camera, spec)
     writer, output_spec, output_desc = create_output_writer(args, spec, runtime_settings)
+    capture: Optional[cv2.VideoCapture] = None
+    active_camera = str(args.camera)
+    capture_error = ""
+    try:
+        capture, active_camera = create_capture(args.camera, spec)
+    except Exception as exc:
+        capture_error = str(exc)
 
     print(f"camera={active_camera}")
     print(f"render_mode={args.render_mode}")
@@ -3206,7 +3212,21 @@ def main() -> int:
         read_failures = 0
         while not STOP_REQUESTED:
             selected_camera = str(runtime_settings.snapshot().get("camera_device", active_camera))
-            if selected_camera != active_camera:
+            if capture is None:
+                try:
+                    capture, active_camera = create_capture(selected_camera, spec)
+                    capture_error = ""
+                    print(f"camera_recovered={active_camera}")
+                    sys.stdout.flush()
+                    read_failures = 0
+                except Exception as exc:
+                    capture_error = str(exc)
+                    placeholder = create_status_frame(spec, "Camera unavailable", capture_error)
+                    writer.write(placeholder)
+                    time.sleep(0.15)
+                    continue
+
+            if selected_camera != active_camera and capture is not None:
                 try:
                     new_capture, new_active_camera = create_capture(selected_camera, spec)
                     capture.release()
@@ -3227,14 +3247,13 @@ def main() -> int:
                         capture.release()
                     except Exception:
                         pass
+                    capture = None
                     try:
-                        capture, active_camera = create_capture(selected_camera, spec)
-                        print(f"camera_recovered={active_camera}")
-                        sys.stdout.flush()
-                        read_failures = 0
+                        placeholder = create_status_frame(spec, "Camera disconnected", selected_camera)
+                        writer.write(placeholder)
                     except Exception:
                         pass
-                time.sleep(0.01)
+                time.sleep(0.05)
                 continue
             read_failures = 0
 
@@ -3292,7 +3311,8 @@ def main() -> int:
                 writer, output_spec, output_desc = create_output_writer(args, spec, runtime_settings)
             time.sleep(frame_delay * 0.15)
     finally:
-        capture.release()
+        if capture is not None:
+            capture.release()
         writer.release()
 
     return 0

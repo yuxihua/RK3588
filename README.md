@@ -114,6 +114,8 @@ GPIO 选择头像（GPIO0/GPIO1 两位共四种）：
 
 `/ui` 页面支持实时调整 `camera_device`（视频源）、`render_mode`、`beauty_strength`、`avatar_scale`、`mouth_x_offset`、`mouth_y_offset`、`detect_every`、`network_jpeg_quality`，提交后立即生效。
 
+如果当前选中的摄像头打不开，`/ui` 和 `/mjpeg` 仍会保持可访问，画面会显示摄像头不可用提示，同时后台会自动重试恢复。
+
 现在美颜还可以选预设和细项：
 
 - 美颜预设：`natural`、`soft`、`bright`、`clear`、`glow`
