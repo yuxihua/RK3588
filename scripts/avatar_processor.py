@@ -2208,6 +2208,44 @@ def detect_face(
         for face in recovery_faces:
             candidates.append(_rescale_box(tuple(int(value) for value in face), scale))
 
+    if len(candidates) == 0 and profile_cascade is not None:
+        # Low-head side-face recovery: search mild rotations only when regular passes fail.
+        frame_h, frame_w = gray.shape[:2]
+        center = (frame_w * 0.5, frame_h * 0.5)
+        for angle in (-18.0, -12.0, 12.0, 18.0):
+            matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+            rotated = cv2.warpAffine(gray, matrix, (frame_w, frame_h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+            for detector in (cascade, profile_cascade):
+                rotated_faces = detector.detectMultiScale(
+                    rotated,
+                    scaleFactor=1.06,
+                    minNeighbors=3,
+                    minSize=(max(24, int(min_side * 0.72)), max(24, int(min_side * 0.72))),
+                )
+                for face in rotated_faces:
+                    x, y, w, h = (int(value) for value in face)
+                    pts = np.array(
+                        [
+                            [x, y],
+                            [x + w, y],
+                            [x, y + h],
+                            [x + w, y + h],
+                        ],
+                        dtype=np.float32,
+                    )
+                    inv = cv2.invertAffineTransform(matrix)
+                    pts = cv2.transform(pts[None, :, :], inv)[0]
+                    rx1 = max(0, int(np.min(pts[:, 0])))
+                    ry1 = max(0, int(np.min(pts[:, 1])))
+                    rx2 = min(frame_w, int(np.max(pts[:, 0])))
+                    ry2 = min(frame_h, int(np.max(pts[:, 1])))
+                    rw = rx2 - rx1
+                    rh = ry2 - ry1
+                    if rw >= min_side and rh >= min_side:
+                        candidates.append(_rescale_box((rx1, ry1, rw, rh), scale))
+            if candidates:
+                break
+
     if len(candidates) == 0:
         return None
 
