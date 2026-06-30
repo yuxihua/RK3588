@@ -227,6 +227,7 @@ BUILD_TAG = "2026-06-26-uvc-probe-v2"
 STATIC_STAGE_CACHE: Dict[Tuple[int, int], np.ndarray] = {}
 AVATAR_FACE_BOX_CACHE: Dict[int, Optional[Tuple[int, int, int, int]]] = {}
 FRAME_COUNTER = 0
+LAST_ROTATION_RETRY_AT = 0.0
 random.seed()
 
 
@@ -555,6 +556,8 @@ def list_video_sources(limit: int = 0) -> list[Dict[str, str]]:
             priority = 0
         elif any(keyword in lower_name for keyword in ["camera", "webcam", "usb", "uvc"]):
             priority = 1
+        elif any(keyword in lower_name for keyword in ["mipi", "rkcif", "rkisp", "scale", "tools", "stream_cif"]):
+            priority = 5
         elif any(keyword in lower_name for keyword in ["metadata", "codec", "isp", "stat", "subdev"]):
             priority = 4
 
@@ -762,6 +765,8 @@ class NetworkMjpegWriter:
     <div class=\"wrap\">
         <div class="card"><img src="{stream_src}" alt="stream" /></div>
         <div class="card">
+            <div class="row"><label>视频源筛选</label><select id="camera_filter_mode"><option value="recommended">推荐（默认）</option><option value="all">全部</option></select></div>
+            <div class="row"><label>视频源关键词</label><input id="camera_filter_text" type="text" placeholder="输入 usb / webcam / 名称片段" /></div>
             <div class="row"><label>视频源</label><select id="camera_device"></select></div>
             <div class="row"><label>美颜预设</label><select id="beauty_preset"><option value="natural">自然</option><option value="soft">柔和</option><option value="bright">提亮</option><option value="clear">清透</option><option value="glow">焕肤</option></select></div>
             <div class="row"><label>渲染模式</label><select id="render_mode"><option value="beauty">beauty</option><option value="avatar">avatar</option></select></div>
@@ -809,19 +814,42 @@ class NetworkMjpegWriter:
     <script>
         const ids = ["camera_device","beauty_preset","render_mode","beauty_strength","skin_smoothness","skin_brightness","skin_sharpen","face_slim","face_round","eye_enlarge","eye_spacing","eyebrow_height","eyebrow_angle","nose_bridge","nose_highlight","mouth_size","lip_color","body_slim","filter_style","avatar_scale","mouth_y_offset","mouth_x_offset","detect_every","network_jpeg_quality"];
         const sliderIds = ["skin_smoothness","skin_brightness","skin_sharpen","face_slim","face_round","eye_enlarge","eye_spacing","eyebrow_height","eyebrow_angle","nose_bridge","nose_highlight","mouth_size","lip_color","body_slim"];
-        async function loadVideoSources(selected) {{
+        let cameraSourceList = [];
+        let selectedCameraSource = "";
+        function renderCameraSources() {{
             const select = document.getElementById('camera_device');
-            const r = await fetch("{writer.video_sources_path}");
-            const d = await r.json();
-            const list = Array.isArray(d.sources) ? d.sources : [];
+            const mode = document.getElementById('camera_filter_mode').value;
+            const keyword = (document.getElementById('camera_filter_text').value || '').trim().toLowerCase();
             select.innerHTML = '';
-            for (const src of list) {{
+            const filtered = cameraSourceList.filter((src) => {{
+                if (!src || !src.value) return false;
+                const p = Number(src.priority || 9);
+                const text = ((src.label || src.value) + ' ' + src.value).toLowerCase();
+                const modeOk = mode === 'all' ? true : (p <= 1 || src.value === selectedCameraSource);
+                const keywordOk = keyword.length === 0 ? true : text.includes(keyword);
+                return modeOk && keywordOk;
+            }});
+            for (const src of filtered) {{
                 const opt = document.createElement('option');
                 opt.value = src.value;
                 opt.textContent = src.label || src.value;
                 select.appendChild(opt);
             }}
-            if (selected) select.value = selected;
+            if (selectedCameraSource) select.value = selectedCameraSource;
+            if (select.options.length === 0) {{
+                const opt = document.createElement('option');
+                opt.value = selectedCameraSource || '';
+                opt.textContent = '未命中过滤结果，可切换到“全部”或清空关键词';
+                select.appendChild(opt);
+            }}
+        }}
+        async function loadVideoSources(selected) {{
+            const select = document.getElementById('camera_device');
+            const r = await fetch("{writer.video_sources_path}");
+            const d = await r.json();
+            cameraSourceList = Array.isArray(d.sources) ? d.sources : [];
+            selectedCameraSource = selected || d.selected || '';
+            renderCameraSources();
         }}
         async function load() {{
             const r = await fetch("{writer.settings_path}");
@@ -853,6 +881,8 @@ class NetworkMjpegWriter:
             el.addEventListener('change', scheduleApply);
             if (el.tagName === 'INPUT' && el.type === 'range') el.addEventListener('input', scheduleApply);
         }}
+        document.getElementById('camera_filter_mode').addEventListener('change', renderCameraSources);
+        document.getElementById('camera_filter_text').addEventListener('input', renderCameraSources);
         document.getElementById('apply').addEventListener('click', apply);
         load();
     </script>
@@ -2135,21 +2165,41 @@ def detect_face(
     cascade: cv2.CascadeClassifier,
     profile_cascade: Optional[cv2.CascadeClassifier] = None,
 ) -> Optional[Tuple[int, int, int, int]]:
+    global LAST_ROTATION_RETRY_AT
+
     gray, scale = _prepare_detection_gray(frame)
     candidates = []
-    min_side = max(36, int(72 * scale))
+    reacquire_mode = TRACKING_STATE.face is None
+    min_side = max(28 if reacquire_mode else 36, int((56 if reacquire_mode else 72) * scale))
+    frontal_scale_factor = 1.08 if reacquire_mode else 1.1
+    frontal_min_neighbors = 3 if reacquire_mode else 4
 
-    frontal_faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(min_side, min_side))
+    frontal_faces = cascade.detectMultiScale(
+        gray,
+        scaleFactor=frontal_scale_factor,
+        minNeighbors=frontal_min_neighbors,
+        minSize=(min_side, min_side),
+    )
     for face in frontal_faces:
         candidates.append(_rescale_box(tuple(int(value) for value in face), scale))
 
     if profile_cascade is not None:
-        profile_left = profile_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(min_side, min_side))
+        profile_left = profile_cascade.detectMultiScale(
+            gray,
+            scaleFactor=frontal_scale_factor,
+            minNeighbors=frontal_min_neighbors,
+            minSize=(min_side, min_side),
+        )
         for face in profile_left:
             candidates.append(_rescale_box(tuple(int(value) for value in face), scale))
 
         gray_flipped = cv2.flip(gray, 1)
-        profile_right = profile_cascade.detectMultiScale(gray_flipped, scaleFactor=1.1, minNeighbors=4, minSize=(min_side, min_side))
+        profile_right = profile_cascade.detectMultiScale(
+            gray_flipped,
+            scaleFactor=frontal_scale_factor,
+            minNeighbors=frontal_min_neighbors,
+            minSize=(min_side, min_side),
+        )
         frame_w = gray.shape[1]
         for face in profile_right:
             x, y, w, h = (int(value) for value in face)
@@ -2208,43 +2258,60 @@ def detect_face(
         for face in recovery_faces:
             candidates.append(_rescale_box(tuple(int(value) for value in face), scale))
 
+    if len(candidates) == 0 and reacquire_mode:
+        # CLAHE improves first-hit speed under dim/low-contrast scenes.
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        boosted = clahe.apply(gray)
+        boosted_faces = cascade.detectMultiScale(
+            boosted,
+            scaleFactor=1.08,
+            minNeighbors=3,
+            minSize=(max(24, int(48 * scale)), max(24, int(48 * scale))),
+        )
+        for face in boosted_faces:
+            candidates.append(_rescale_box(tuple(int(value) for value in face), scale))
+
     if len(candidates) == 0 and profile_cascade is not None:
-        # Low-head side-face recovery: search mild rotations only when regular passes fail.
-        frame_h, frame_w = gray.shape[:2]
-        center = (frame_w * 0.5, frame_h * 0.5)
-        for angle in (-18.0, -12.0, 12.0, 18.0):
-            matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
-            rotated = cv2.warpAffine(gray, matrix, (frame_w, frame_h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-            for detector in (cascade, profile_cascade):
-                rotated_faces = detector.detectMultiScale(
-                    rotated,
-                    scaleFactor=1.06,
-                    minNeighbors=3,
-                    minSize=(max(24, int(min_side * 0.72)), max(24, int(min_side * 0.72))),
-                )
-                for face in rotated_faces:
-                    x, y, w, h = (int(value) for value in face)
-                    pts = np.array(
-                        [
-                            [x, y],
-                            [x + w, y],
-                            [x, y + h],
-                            [x + w, y + h],
-                        ],
-                        dtype=np.float32,
+        # Rotation recovery is expensive; throttle retries to keep FPS and improve responsiveness.
+        now = time.monotonic()
+        should_try_rotation = (not reacquire_mode) or (now - LAST_ROTATION_RETRY_AT >= 0.35)
+        if should_try_rotation:
+            LAST_ROTATION_RETRY_AT = now
+            frame_h, frame_w = gray.shape[:2]
+            center = (frame_w * 0.5, frame_h * 0.5)
+            for angle in (-18.0, -12.0, 12.0, 18.0):
+                matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+                rotated = cv2.warpAffine(gray, matrix, (frame_w, frame_h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+                for detector in (cascade, profile_cascade):
+                    rotated_faces = detector.detectMultiScale(
+                        rotated,
+                        scaleFactor=1.06,
+                        minNeighbors=3,
+                        minSize=(max(24, int(min_side * 0.72)), max(24, int(min_side * 0.72))),
                     )
-                    inv = cv2.invertAffineTransform(matrix)
-                    pts = cv2.transform(pts[None, :, :], inv)[0]
-                    rx1 = max(0, int(np.min(pts[:, 0])))
-                    ry1 = max(0, int(np.min(pts[:, 1])))
-                    rx2 = min(frame_w, int(np.max(pts[:, 0])))
-                    ry2 = min(frame_h, int(np.max(pts[:, 1])))
-                    rw = rx2 - rx1
-                    rh = ry2 - ry1
-                    if rw >= min_side and rh >= min_side:
-                        candidates.append(_rescale_box((rx1, ry1, rw, rh), scale))
-            if candidates:
-                break
+                    for face in rotated_faces:
+                        x, y, w, h = (int(value) for value in face)
+                        pts = np.array(
+                            [
+                                [x, y],
+                                [x + w, y],
+                                [x, y + h],
+                                [x + w, y + h],
+                            ],
+                            dtype=np.float32,
+                        )
+                        inv = cv2.invertAffineTransform(matrix)
+                        pts = cv2.transform(pts[None, :, :], inv)[0]
+                        rx1 = max(0, int(np.min(pts[:, 0])))
+                        ry1 = max(0, int(np.min(pts[:, 1])))
+                        rx2 = min(frame_w, int(np.max(pts[:, 0])))
+                        ry2 = min(frame_h, int(np.max(pts[:, 1])))
+                        rw = rx2 - rx1
+                        rh = ry2 - ry1
+                        if rw >= min_side and rh >= min_side:
+                            candidates.append(_rescale_box((rx1, ry1, rw, rh), scale))
+                if candidates:
+                    break
 
     if len(candidates) == 0:
         return None
