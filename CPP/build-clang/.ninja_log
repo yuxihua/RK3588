@@ -1,8 +1,10 @@
 # ninja log v7
-48	566	8046590323677730	build.ninja	1834b75390777d4a
-48	566	8046590323607100	C:/data/BaiduSyncdisk/2026/直播课堂/RK3588/CPP/build-clang/cmake_install.cmake	1834b75390777d4a
+4	432	8046756307281683	build.ninja	1834b75390777d4a
+4	432	8046756307166189	C:/data/BaiduSyncdisk/2026/直播课堂/RK3588/CPP/build-clang/cmake_install.cmake	1834b75390777d4a
 56	4244	8046589242046229	CMakeFiles/avatar_gateway.dir/src/main.cpp.obj	74c9f659f30af914
-4248	5490	8046589283956770	avatar_gateway.exe	dc4031e31359fa2e
-4	432	8046590323677730	build.ninja	1834b75390777d4a
-4	432	8046590323677730	C:/data/BaiduSyncdisk/2026/直播课堂/RK3588/CPP/build-clang/cmake_install.cmake	1834b75390777d4a
 44	1621	8046590325173530	avatar_gateway.exe	9fd08650bc215266
+36	5201	8046756307281683	build.ninja	1834b75390777d4a
+36	5201	8046756307281683	C:/data/BaiduSyncdisk/2026/直播课堂/RK3588/CPP/build-clang/cmake_install.cmake	1834b75390777d4a
+22	4892	8046758563178840	CMakeFiles/avatar_gateway.dir/src/main.cpp.obj	74c9f659f30af914
+71	4201	8046759307449647	CMakeFiles/avatar_gateway.dir/src/main.cpp.obj	74c9f659f30af914
+4203	6490	8046759348777473	avatar_gateway.exe	9fd08650bc215266

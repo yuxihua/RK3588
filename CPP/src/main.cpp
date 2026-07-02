@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <limits>
+#include <map>
 #include <opencv2/opencv.hpp>
 #include <sstream>
 #include <string>
@@ -113,6 +114,18 @@ struct Options {
     std::string fallback_style = "normal";
 };
 
+struct RuntimeSettings {
+    std::mutex mutex;
+    std::string render_mode = "beauty";
+    std::string background_mode = "camera";
+    int detect_every = 2;
+    double beauty_strength = 0.45;
+    double avatar_scale = 1.0;
+    double mouth_y_offset = 0.0;
+    double mouth_x_offset = 0.0;
+    int network_jpeg_quality = 70;
+};
+
 std::atomic<bool> g_stop_requested{false};
 
 void handle_signal(int) {
@@ -132,6 +145,10 @@ std::string trim(std::string value) {
     value.erase(std::find_if(value.rbegin(), value.rend(), [&](unsigned char ch) { return !is_space(ch); }).base(), value.end());
     return value;
 }
+
+std::string json_escape(const std::string& input);
+std::map<std::string, std::string> parse_query(const std::string& query);
+void clamp_runtime_settings(RuntimeSettings& settings);
 
 bool parse_int(const std::string& text, int& value) {
     try {
@@ -564,8 +581,8 @@ struct GpioAvatarSelector {
 
 class MjpegServer {
 public:
-    MjpegServer(std::string host, int port, std::string path, int quality)
-        : host_(std::move(host)), port_(port), path_(std::move(path)), quality_(quality) {}
+    MjpegServer(std::string host, int port, std::string path, int quality, std::shared_ptr<RuntimeSettings> settings)
+        : host_(std::move(host)), port_(port), path_(std::move(path)), quality_(quality), settings_(std::move(settings)) {}
 
     ~MjpegServer() {
         stop();
@@ -638,8 +655,13 @@ public:
     }
 
     void publish(const cv::Mat& frame) {
+        int jpeg_quality = quality_;
+        if (settings_) {
+            std::lock_guard<std::mutex> lock(settings_->mutex);
+            jpeg_quality = settings_->network_jpeg_quality;
+        }
         std::vector<uchar> jpeg;
-        std::vector<int> params{cv::IMWRITE_JPEG_QUALITY, quality_};
+        std::vector<int> params{cv::IMWRITE_JPEG_QUALITY, jpeg_quality};
         if (!cv::imencode(".jpg", frame, jpeg, params)) {
             return;
         }
@@ -690,7 +712,214 @@ private:
         return true;
     }
 
+    static std::string read_http_request(socket_t fd) {
+        std::string request;
+        char buffer[4096];
+        const int received = ::recv(fd, buffer, sizeof(buffer) - 1, 0);
+        if (received <= 0) {
+            return {};
+        }
+        request.assign(buffer, buffer + received);
+        return request;
+    }
+
+    static std::string get_request_path(const std::string& request) {
+        const size_t line_end = request.find("\r\n");
+        const std::string line = request.substr(0, line_end);
+        const size_t sp1 = line.find(' ');
+        if (sp1 == std::string::npos) {
+            return "/";
+        }
+        const size_t sp2 = line.find(' ', sp1 + 1);
+        if (sp2 == std::string::npos) {
+            return "/";
+        }
+        return line.substr(sp1 + 1, sp2 - sp1 - 1);
+    }
+
+    bool send_ui_page(socket_t fd) {
+        std::string render_mode = "beauty";
+        std::string background_mode = "camera";
+        int detect_every = 2;
+        double beauty_strength = 0.45;
+        double avatar_scale = 1.0;
+        double mouth_y_offset = 0.0;
+        double mouth_x_offset = 0.0;
+        int network_jpeg_quality = 70;
+        if (settings_) {
+            std::lock_guard<std::mutex> lock(settings_->mutex);
+            render_mode = settings_->render_mode;
+            background_mode = settings_->background_mode;
+            detect_every = settings_->detect_every;
+            beauty_strength = settings_->beauty_strength;
+            avatar_scale = settings_->avatar_scale;
+            mouth_y_offset = settings_->mouth_y_offset;
+            mouth_x_offset = settings_->mouth_x_offset;
+            network_jpeg_quality = settings_->network_jpeg_quality;
+        }
+
+        std::ostringstream html;
+        html << "<!doctype html><html><head><meta charset='utf-8'><title>Avatar Settings</title>"
+             << "<style>body{background:#090c11;color:#f0f4ff;font-family:sans-serif;margin:0;padding:16px;}"
+             << ".row{margin:8px 0;}label{display:inline-block;width:180px;}input,select{min-width:200px;}"
+             << "img{max-width:100%;border:1px solid #2b3a55;}button{margin-top:10px;padding:6px 14px;}</style></head><body>"
+             << "<h2>Avatar Gateway Settings</h2>"
+             << "<div class='row'><img src='" << path_ << "' alt='mjpeg'></div>"
+             << "<form method='get' action='/api/settings'>"
+             << "<div class='row'><label>render_mode</label><select name='render_mode'>"
+             << "<option value='beauty'" << (render_mode == "beauty" ? " selected" : "") << ">beauty</option>"
+             << "<option value='avatar'" << (render_mode == "avatar" ? " selected" : "") << ">avatar</option>"
+             << "</select></div>"
+             << "<div class='row'><label>background_mode</label><select name='background_mode'>"
+             << "<option value='camera'" << (background_mode == "camera" ? " selected" : "") << ">camera</option>"
+             << "<option value='virtual'" << (background_mode == "virtual" ? " selected" : "") << ">virtual</option>"
+             << "</select></div>"
+             << "<div class='row'><label>beauty_strength</label><input name='beauty_strength' value='" << beauty_strength << "'></div>"
+             << "<div class='row'><label>avatar_scale</label><input name='avatar_scale' value='" << avatar_scale << "'></div>"
+             << "<div class='row'><label>mouth_y_offset</label><input name='mouth_y_offset' value='" << mouth_y_offset << "'></div>"
+             << "<div class='row'><label>mouth_x_offset</label><input name='mouth_x_offset' value='" << mouth_x_offset << "'></div>"
+             << "<div class='row'><label>detect_every</label><input name='detect_every' value='" << detect_every << "'></div>"
+             << "<div class='row'><label>network_jpeg_quality</label><input name='network_jpeg_quality' value='" << network_jpeg_quality << "'></div>"
+             << "<button type='submit'>Apply</button></form>"
+             << "<p>API: <a href='/api/settings'>/api/settings</a></p></body></html>";
+
+        const std::string body = html.str();
+        std::ostringstream response;
+        response << "HTTP/1.0 200 OK\r\n"
+                 << "Content-Type: text/html; charset=utf-8\r\n"
+                 << "Content-Length: " << body.size() << "\r\n"
+                 << "Connection: close\r\n\r\n"
+                 << body;
+        const std::string payload = response.str();
+        return send_all(fd, payload.data(), payload.size());
+    }
+
+    bool send_settings_json(socket_t fd, const std::string& query) {
+        if (settings_) {
+            const auto params = parse_query(query);
+            std::lock_guard<std::mutex> lock(settings_->mutex);
+            auto it = params.find("render_mode");
+            if (it != params.end() && !it->second.empty()) {
+                settings_->render_mode = it->second;
+            }
+            it = params.find("background_mode");
+            if (it != params.end() && !it->second.empty()) {
+                settings_->background_mode = it->second;
+            }
+            it = params.find("detect_every");
+            if (it != params.end()) {
+                parse_int(it->second, settings_->detect_every);
+            }
+            it = params.find("network_jpeg_quality");
+            if (it != params.end()) {
+                parse_int(it->second, settings_->network_jpeg_quality);
+            }
+            it = params.find("beauty_strength");
+            if (it != params.end()) {
+                parse_double(it->second, settings_->beauty_strength);
+            }
+            it = params.find("avatar_scale");
+            if (it != params.end()) {
+                parse_double(it->second, settings_->avatar_scale);
+            }
+            it = params.find("mouth_y_offset");
+            if (it != params.end()) {
+                parse_double(it->second, settings_->mouth_y_offset);
+            }
+            it = params.find("mouth_x_offset");
+            if (it != params.end()) {
+                parse_double(it->second, settings_->mouth_x_offset);
+            }
+            clamp_runtime_settings(*settings_);
+        }
+
+        std::string render_mode = "beauty";
+        std::string background_mode = "camera";
+        int detect_every = 2;
+        double beauty_strength = 0.45;
+        double avatar_scale = 1.0;
+        double mouth_y_offset = 0.0;
+        double mouth_x_offset = 0.0;
+        int network_jpeg_quality = 70;
+        if (settings_) {
+            std::lock_guard<std::mutex> lock(settings_->mutex);
+            render_mode = settings_->render_mode;
+            background_mode = settings_->background_mode;
+            detect_every = settings_->detect_every;
+            beauty_strength = settings_->beauty_strength;
+            avatar_scale = settings_->avatar_scale;
+            mouth_y_offset = settings_->mouth_y_offset;
+            mouth_x_offset = settings_->mouth_x_offset;
+            network_jpeg_quality = settings_->network_jpeg_quality;
+        }
+
+        std::ostringstream body;
+        body << "{"
+             << "\"render_mode\":\"" << json_escape(render_mode) << "\"," 
+             << "\"background_mode\":\"" << json_escape(background_mode) << "\"," 
+             << "\"detect_every\":" << detect_every << ","
+             << "\"beauty_strength\":" << beauty_strength << ","
+             << "\"avatar_scale\":" << avatar_scale << ","
+             << "\"mouth_y_offset\":" << mouth_y_offset << ","
+             << "\"mouth_x_offset\":" << mouth_x_offset << ","
+             << "\"network_jpeg_quality\":" << network_jpeg_quality
+             << "}";
+
+        std::ostringstream response;
+        response << "HTTP/1.0 200 OK\r\n"
+                 << "Content-Type: application/json; charset=utf-8\r\n"
+                 << "Content-Length: " << body.str().size() << "\r\n"
+                 << "Connection: close\r\n\r\n"
+                 << body.str();
+        const std::string payload = response.str();
+        return send_all(fd, payload.data(), payload.size());
+    }
+
+    bool send_not_found(socket_t fd) {
+        static const std::string body = "Not Found\n";
+        std::ostringstream response;
+        response << "HTTP/1.0 404 Not Found\r\n"
+                 << "Content-Type: text/plain\r\n"
+                 << "Content-Length: " << body.size() << "\r\n"
+                 << "Connection: close\r\n\r\n"
+                 << body;
+        const std::string payload = response.str();
+        return send_all(fd, payload.data(), payload.size());
+    }
+
     void client_loop(socket_t client_fd) {
+        const std::string request = read_http_request(client_fd);
+        if (request.empty()) {
+            close_socket(client_fd);
+            return;
+        }
+
+        const std::string raw_path = get_request_path(request);
+        const size_t query_sep = raw_path.find('?');
+        const std::string path = query_sep == std::string::npos ? raw_path : raw_path.substr(0, query_sep);
+        const std::string query = query_sep == std::string::npos ? "" : raw_path.substr(query_sep + 1);
+
+        if (path == "/ui" || path == "/") {
+            send_ui_page(client_fd);
+            shutdown_socket(client_fd);
+            close_socket(client_fd);
+            return;
+        }
+
+        if (path == "/api/settings") {
+            send_settings_json(client_fd, query);
+            shutdown_socket(client_fd);
+            close_socket(client_fd);
+            return;
+        }
+
+        if (!(path == path_ || path == "/mjpeg")) {
+            send_not_found(client_fd);
+            shutdown_socket(client_fd);
+            close_socket(client_fd);
+            return;
+        }
+
         const std::string boundary = "frame";
         const std::string header =
             "HTTP/1.0 200 OK\r\n"
@@ -745,6 +974,7 @@ private:
     int port_;
     std::string path_;
     int quality_;
+    std::shared_ptr<RuntimeSettings> settings_;
     socket_t listen_fd_ = INVALID_SOCKET_FD;
     std::atomic<bool> running_{false};
     std::thread accept_thread_;
@@ -863,6 +1093,20 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    auto runtime_settings = std::make_shared<RuntimeSettings>();
+    {
+        std::lock_guard<std::mutex> lock(runtime_settings->mutex);
+        runtime_settings->render_mode = options.render_mode;
+        runtime_settings->background_mode = options.background_mode;
+        runtime_settings->detect_every = options.detect_every;
+        runtime_settings->beauty_strength = options.beauty_strength;
+        runtime_settings->avatar_scale = options.avatar_scale;
+        runtime_settings->mouth_y_offset = options.mouth_y_offset;
+        runtime_settings->mouth_x_offset = options.mouth_x_offset;
+        runtime_settings->network_jpeg_quality = options.network_jpeg_quality;
+        clamp_runtime_settings(*runtime_settings);
+    }
+
     cv::VideoWriter writer;
     std::unique_ptr<MjpegServer> server;
     if (options.output_mode == "usb") {
@@ -871,7 +1115,7 @@ int main(int argc, char** argv) {
             return 1;
         }
     } else {
-        server = std::make_unique<MjpegServer>(options.network_host, options.network_port, options.network_path, options.network_jpeg_quality);
+        server = std::make_unique<MjpegServer>(options.network_host, options.network_port, options.network_path, options.network_jpeg_quality, runtime_settings);
         if (!server->start()) {
             std::cerr << "failed to start MJPEG server on " << options.network_host << ':' << options.network_port << '\n';
             return 1;
@@ -888,7 +1132,6 @@ int main(int argc, char** argv) {
     std::cout << "processing_started=true\n";
     std::cout.flush();
 
-    const auto frame_delay = std::chrono::duration<double>(1.0 / std::max(1, options.fps));
     std::string current_avatar_path = avatar_path;
     cv::Mat current_avatar = avatar;
     cv::Rect last_face;
@@ -918,7 +1161,22 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (frame_index % options.detect_every == 0) {
+        std::string render_mode;
+        std::string background_mode;
+        int detect_every = options.detect_every;
+        int fps = options.fps;
+        double avatar_scale = options.avatar_scale;
+        double beauty_strength = options.beauty_strength;
+        {
+            std::lock_guard<std::mutex> lock(runtime_settings->mutex);
+            render_mode = runtime_settings->render_mode;
+            background_mode = runtime_settings->background_mode;
+            detect_every = runtime_settings->detect_every;
+            avatar_scale = runtime_settings->avatar_scale;
+            beauty_strength = runtime_settings->beauty_strength;
+        }
+
+        if (frame_index % std::max(1, detect_every) == 0) {
             last_face = detect_face(frame, face_cascade);
         }
         ++frame_index;
@@ -926,11 +1184,11 @@ int main(int argc, char** argv) {
         const cv::Mat output = build_output_frame(
             frame,
             current_avatar,
-            options.render_mode,
-            options.background_mode,
+            render_mode,
+            background_mode,
             last_face,
-            options.avatar_scale,
-            options.beauty_strength);
+            avatar_scale,
+            beauty_strength);
 
         if (options.output_mode == "usb") {
             writer.write(output);
@@ -938,6 +1196,7 @@ int main(int argc, char** argv) {
             server->publish(output);
         }
 
+        const auto frame_delay = std::chrono::duration<double>(1.0 / std::max(1, fps));
         std::this_thread::sleep_for(frame_delay * 0.15);
     }
 
@@ -948,3 +1207,87 @@ int main(int argc, char** argv) {
     capture.release();
     return 0;
 }
+
+namespace {
+
+std::string json_escape(const std::string& input) {
+    std::string out;
+    out.reserve(input.size() + 8);
+    for (char ch : input) {
+        switch (ch) {
+            case '\\': out += "\\\\"; break;
+            case '"': out += "\\\""; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default: out += ch; break;
+        }
+    }
+    return out;
+}
+
+char from_hex(char ch) {
+    if (ch >= '0' && ch <= '9') {
+        return static_cast<char>(ch - '0');
+    }
+    if (ch >= 'a' && ch <= 'f') {
+        return static_cast<char>(10 + ch - 'a');
+    }
+    if (ch >= 'A' && ch <= 'F') {
+        return static_cast<char>(10 + ch - 'A');
+    }
+    return 0;
+}
+
+std::string url_decode(const std::string& input) {
+    std::string out;
+    out.reserve(input.size());
+    for (size_t i = 0; i < input.size(); ++i) {
+        if (input[i] == '+') {
+            out += ' ';
+            continue;
+        }
+        if (input[i] == '%' && i + 2 < input.size()) {
+            const char hi = from_hex(input[i + 1]);
+            const char lo = from_hex(input[i + 2]);
+            out += static_cast<char>((hi << 4) | lo);
+            i += 2;
+            continue;
+        }
+        out += input[i];
+    }
+    return out;
+}
+
+std::map<std::string, std::string> parse_query(const std::string& query) {
+    std::map<std::string, std::string> values;
+    size_t begin = 0;
+    while (begin < query.size()) {
+        const size_t end = query.find('&', begin);
+        const std::string pair = query.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+        const size_t sep = pair.find('=');
+        const std::string key = url_decode(pair.substr(0, sep));
+        const std::string value = sep == std::string::npos ? "" : url_decode(pair.substr(sep + 1));
+        if (!key.empty()) {
+            values[key] = value;
+        }
+        if (end == std::string::npos) {
+            break;
+        }
+        begin = end + 1;
+    }
+    return values;
+}
+
+void clamp_runtime_settings(RuntimeSettings& settings) {
+    settings.render_mode = to_lower(settings.render_mode);
+    settings.background_mode = to_lower(settings.background_mode);
+    settings.detect_every = std::max(1, settings.detect_every);
+    settings.beauty_strength = std::clamp(settings.beauty_strength, 0.0, 1.0);
+    settings.avatar_scale = std::clamp(settings.avatar_scale, 0.6, 3.0);
+    settings.mouth_y_offset = std::clamp(settings.mouth_y_offset, -1.0, 1.0);
+    settings.mouth_x_offset = std::clamp(settings.mouth_x_offset, -1.0, 1.0);
+    settings.network_jpeg_quality = std::clamp(settings.network_jpeg_quality, 40, 95);
+}
+
+}  // namespace
