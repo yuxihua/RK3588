@@ -111,6 +111,8 @@ struct Options {
     double avatar_scale = 1.0;
     std::string eye_animation = "subtle";
     std::string mouth_animation = "normal";
+    std::string mouth_style = "normal";
+    double mouth_gain = 1.0;
     double mouth_y_offset = 0.0;
     double mouth_x_offset = 0.0;
     std::string background_mode = "camera";
@@ -122,6 +124,8 @@ struct RuntimeSettings {
     std::string render_mode = "beauty";
     std::string background_mode = "camera";
     std::string mouth_animation = "normal";
+    std::string mouth_style = "normal";
+    double mouth_gain = 1.0;
     int detect_every = 2;
     double beauty_strength = 0.45;
     double avatar_scale = 1.0;
@@ -254,6 +258,10 @@ Options parse_args(int argc, char** argv) {
             options.eye_animation = get_value(index, argc, argv);
         } else if (arg == "--mouth-animation") {
             options.mouth_animation = get_value(index, argc, argv);
+        } else if (arg == "--mouth-style") {
+            options.mouth_style = get_value(index, argc, argv);
+        } else if (arg == "--mouth-gain") {
+            parse_double(get_value(index, argc, argv), options.mouth_gain);
         } else if (arg == "--mouth-y-offset") {
             parse_double(get_value(index, argc, argv), options.mouth_y_offset);
         } else if (arg == "--mouth-x-offset") {
@@ -272,6 +280,7 @@ Options parse_args(int argc, char** argv) {
     options.background_mode = to_lower(options.background_mode);
     options.eye_animation = to_lower(options.eye_animation);
     options.mouth_animation = to_lower(options.mouth_animation);
+    options.mouth_style = to_lower(options.mouth_style);
     options.fallback_style = to_lower(options.fallback_style);
     options.network_path = options.network_path.empty() ? "/mjpeg" : options.network_path;
     options.width = std::max(1, options.width);
@@ -282,6 +291,7 @@ Options parse_args(int argc, char** argv) {
     options.network_jpeg_quality = std::clamp(options.network_jpeg_quality, 40, 95);
     options.avatar_scale = std::clamp(options.avatar_scale, 0.6, 3.0);
     options.beauty_strength = std::clamp(options.beauty_strength, 0.0, 1.0);
+    options.mouth_gain = std::clamp(options.mouth_gain, 0.5, 3.0);
     return options;
 }
 
@@ -875,6 +885,8 @@ private:
         std::string render_mode = "beauty";
         std::string background_mode = "camera";
         std::string mouth_animation = "normal";
+        std::string mouth_style = "normal";
+        double mouth_gain = 1.0;
         int detect_every = 2;
         double beauty_strength = 0.45;
         double avatar_scale = 1.0;
@@ -886,6 +898,8 @@ private:
             render_mode = settings_->render_mode;
             background_mode = settings_->background_mode;
             mouth_animation = settings_->mouth_animation;
+            mouth_style = settings_->mouth_style;
+            mouth_gain = settings_->mouth_gain;
             detect_every = settings_->detect_every;
             beauty_strength = settings_->beauty_strength;
             avatar_scale = settings_->avatar_scale;
@@ -914,6 +928,12 @@ private:
              << "<option value='normal'" << (mouth_animation == "normal" ? " selected" : "") << ">normal</option>"
              << "<option value='off'" << (mouth_animation == "off" ? " selected" : "") << ">off</option>"
              << "</select></div>"
+             << "<div class='row'><label>mouth_style</label><select name='mouth_style'>"
+             << "<option value='soft'" << (mouth_style == "soft" ? " selected" : "") << ">soft</option>"
+             << "<option value='normal'" << (mouth_style == "normal" ? " selected" : "") << ">normal</option>"
+             << "<option value='exaggerated'" << (mouth_style == "exaggerated" ? " selected" : "") << ">exaggerated</option>"
+             << "</select></div>"
+             << "<div class='row'><label>mouth_gain</label><input name='mouth_gain' value='" << mouth_gain << "'></div>"
              << "<div class='row'><label>beauty_strength</label><input name='beauty_strength' value='" << beauty_strength << "'></div>"
              << "<div class='row'><label>avatar_scale</label><input name='avatar_scale' value='" << avatar_scale << "'></div>"
              << "<div class='row'><label>mouth_y_offset</label><input name='mouth_y_offset' value='" << mouth_y_offset << "'></div>"
@@ -952,6 +972,14 @@ private:
                 if (it != params.end() && !it->second.empty()) {
                     settings_->mouth_animation = it->second;
                 }
+                it = params.find("mouth_style");
+                if (it != params.end() && !it->second.empty()) {
+                    settings_->mouth_style = it->second;
+                }
+                it = params.find("mouth_gain");
+                if (it != params.end()) {
+                    parse_double(it->second, settings_->mouth_gain);
+                }
                 it = params.find("detect_every");
                 if (it != params.end()) {
                     parse_int(it->second, settings_->detect_every);
@@ -984,6 +1012,8 @@ private:
         std::string render_mode = "beauty";
         std::string background_mode = "camera";
         std::string mouth_animation = "normal";
+        std::string mouth_style = "normal";
+        double mouth_gain = 1.0;
         int detect_every = 2;
         double beauty_strength = 0.45;
         double avatar_scale = 1.0;
@@ -995,6 +1025,8 @@ private:
             render_mode = settings_->render_mode;
             background_mode = settings_->background_mode;
             mouth_animation = settings_->mouth_animation;
+            mouth_style = settings_->mouth_style;
+            mouth_gain = settings_->mouth_gain;
             detect_every = settings_->detect_every;
             beauty_strength = settings_->beauty_strength;
             avatar_scale = settings_->avatar_scale;
@@ -1008,6 +1040,8 @@ private:
              << "\"render_mode\":\"" << json_escape(render_mode) << "\"," 
              << "\"background_mode\":\"" << json_escape(background_mode) << "\"," 
                << "\"mouth_animation\":\"" << json_escape(mouth_animation) << "\"," 
+               << "\"mouth_style\":\"" << json_escape(mouth_style) << "\"," 
+               << "\"mouth_gain\":" << mouth_gain << ","
              << "\"detect_every\":" << detect_every << ","
              << "\"beauty_strength\":" << beauty_strength << ","
              << "\"avatar_scale\":" << avatar_scale << ","
@@ -1224,7 +1258,9 @@ double estimate_mouth_activity(const cv::Mat& frame,
 cv::Mat animate_avatar_mouth(const cv::Mat& avatar,
                              double mouth_activity,
                              double mouth_y_offset,
-                             double mouth_x_offset) {
+                             double mouth_x_offset,
+                             const std::string& mouth_style,
+                             double mouth_gain) {
     if (avatar.empty() || mouth_activity < 0.02) {
         return avatar;
     }
@@ -1238,36 +1274,80 @@ cv::Mat animate_avatar_mouth(const cv::Mat& avatar,
 
     const int w = animated.cols;
     const int h = animated.rows;
-    const int mouth_w = std::max(10, static_cast<int>(w * 0.40));
-    const int mouth_h = std::max(8, static_cast<int>(h * 0.18));
-    const int mouth_x = std::clamp(static_cast<int>(w * 0.30 + mouth_x_offset * w * 0.10), 0, std::max(0, w - mouth_w));
-    const int mouth_y = std::clamp(static_cast<int>(h * 0.66 + mouth_y_offset * h * 0.12), 0, std::max(0, h - mouth_h));
+    const int mouth_w = std::max(12, static_cast<int>(w * 0.36));
+    const int mouth_h = std::max(10, static_cast<int>(h * 0.14));
+    const int mouth_x = std::clamp(static_cast<int>(w * 0.32 + mouth_x_offset * w * 0.10), 0, std::max(0, w - mouth_w));
+    const int mouth_y = std::clamp(static_cast<int>(h * 0.68 + mouth_y_offset * h * 0.10), 0, std::max(0, h - mouth_h));
     const cv::Rect mouth_rect(mouth_x, mouth_y, mouth_w, mouth_h);
 
-    cv::Mat roi = animated(mouth_rect);
-    cv::Mat mask = cv::Mat::zeros(mouth_rect.height, mouth_rect.width, CV_8UC1);
+    cv::Mat src_roi = animated(mouth_rect).clone();
+    cv::Mat dst_roi = src_roi.clone();
 
-    const double open_level = std::clamp((mouth_activity - 0.04) * 1.9, 0.0, 1.0);
-    const int axis_x = std::max(3, static_cast<int>(mouth_rect.width * 0.26));
-    const int axis_y = std::max(2, static_cast<int>(mouth_rect.height * (0.08 + 0.38 * open_level)));
-    const cv::Point center(mouth_rect.width / 2, static_cast<int>(mouth_rect.height * 0.55));
-    cv::ellipse(mask, center, cv::Size(axis_x, axis_y), 0.0, 0.0, 360.0, cv::Scalar(255), -1, cv::LINE_AA);
+    double style_multiplier = 1.0;
+    if (mouth_style == "soft") {
+        style_multiplier = 0.72;
+    } else if (mouth_style == "exaggerated") {
+        style_multiplier = 1.45;
+    }
+    const double gain = std::clamp(mouth_gain, 0.5, 3.0) * style_multiplier;
+    const double open_level = std::clamp((mouth_activity - 0.03) * 2.2 * gain, 0.0, 1.0);
+    if (open_level < 0.05) {
+        return animated;
+    }
 
-    const cv::Vec3f mouth_color(22.0f, 20.0f, 58.0f);
-    const float strength_base = static_cast<float>(0.35 + 0.45 * open_level);
-    for (int y = 0; y < roi.rows; ++y) {
-        auto* px = roi.ptr<cv::Vec4b>(y);
-        const auto* mk = mask.ptr<std::uint8_t>(y);
-        for (int x = 0; x < roi.cols; ++x) {
-            if (mk[x] == 0) {
-                continue;
-            }
-            const float alpha = (mk[x] / 255.0f) * strength_base;
-            px[x][0] = static_cast<std::uint8_t>(px[x][0] * (1.0f - alpha) + mouth_color[0] * alpha);
-            px[x][1] = static_cast<std::uint8_t>(px[x][1] * (1.0f - alpha) + mouth_color[1] * alpha);
-            px[x][2] = static_cast<std::uint8_t>(px[x][2] * (1.0f - alpha) + mouth_color[2] * alpha);
+    const int split_y = std::clamp(static_cast<int>(mouth_rect.height * 0.50), 1, mouth_rect.height - 2);
+    const int open_px = std::max(1, static_cast<int>(mouth_rect.height * (0.12 + 0.60 * open_level)));
+
+    const cv::Rect top_rect(0, 0, mouth_rect.width, split_y);
+    const cv::Rect bottom_rect(0, split_y, mouth_rect.width, mouth_rect.height - split_y);
+    cv::Mat top_part = src_roi(top_rect).clone();
+    cv::Mat bottom_part = src_roi(bottom_rect).clone();
+
+    dst_roi.setTo(cv::Scalar(0, 0, 0, 0));
+
+    const int top_y = std::max(0, split_y - top_part.rows - open_px / 2);
+    const int bottom_y = std::min(mouth_rect.height - bottom_part.rows, split_y + open_px / 2);
+    top_part.copyTo(dst_roi(cv::Rect(0, top_y, top_part.cols, top_part.rows)));
+    bottom_part.copyTo(dst_roi(cv::Rect(0, bottom_y, bottom_part.cols, bottom_part.rows)));
+
+    const int gap_y0 = std::clamp(split_y - open_px / 2, 0, mouth_rect.height - 1);
+    const int gap_y1 = std::clamp(split_y + open_px / 2, 0, mouth_rect.height - 1);
+    for (int y = gap_y0; y <= gap_y1; ++y) {
+        const double t = (gap_y1 > gap_y0) ? static_cast<double>(y - gap_y0) / (gap_y1 - gap_y0) : 0.5;
+        const double band = 1.0 - std::abs(t - 0.5) * 2.0;
+        auto* px = dst_roi.ptr<cv::Vec4b>(y);
+        for (int x = 0; x < dst_roi.cols; ++x) {
+            const double edge = 1.0 - std::abs((2.0 * x / std::max(1, dst_roi.cols - 1)) - 1.0);
+            const double alpha = std::clamp(0.20 + 0.65 * band * edge, 0.0, 0.92);
+            const cv::Vec3d mouth_color(18.0, 16.0, 48.0);
+            px[x][0] = static_cast<std::uint8_t>(px[x][0] * (1.0 - alpha) + mouth_color[0] * alpha);
+            px[x][1] = static_cast<std::uint8_t>(px[x][1] * (1.0 - alpha) + mouth_color[1] * alpha);
+            px[x][2] = static_cast<std::uint8_t>(px[x][2] * (1.0 - alpha) + mouth_color[2] * alpha);
+            px[x][3] = std::max<std::uint8_t>(px[x][3], static_cast<std::uint8_t>(220));
         }
     }
+
+    cv::Mat feather = cv::Mat::zeros(mouth_rect.height, mouth_rect.width, CV_8UC1);
+    cv::ellipse(feather,
+                cv::Point(mouth_rect.width / 2, mouth_rect.height / 2),
+                cv::Size(std::max(2, static_cast<int>(mouth_rect.width * 0.48)),
+                         std::max(2, static_cast<int>(mouth_rect.height * 0.60))),
+                0.0,
+                0.0,
+                360.0,
+                cv::Scalar(255),
+                -1,
+                cv::LINE_AA);
+    cv::GaussianBlur(feather, feather, cv::Size(5, 5), 0.0);
+
+    std::vector<cv::Mat> dst_channels;
+    cv::split(dst_roi, dst_channels);
+    if (dst_channels.size() == 4) {
+        dst_channels[3] = cv::max(dst_channels[3], feather);
+        cv::merge(dst_channels, dst_roi);
+    }
+
+    dst_roi.copyTo(animated(mouth_rect), feather);
 
     return animated;
 }
@@ -1277,8 +1357,10 @@ cv::Mat build_output_frame(const cv::Mat& frame,
                            const std::string& render_mode,
                            const std::string& background_mode,
                            const std::string& mouth_animation,
+                           const std::string& mouth_style,
                            const cv::Rect& face_box,
                            double avatar_scale,
+                           double mouth_gain,
                            double mouth_y_offset,
                            double mouth_x_offset,
                            double mouth_activity,
@@ -1295,7 +1377,13 @@ cv::Mat build_output_frame(const cv::Mat& frame,
         if (!avatar.empty() && !face_box.empty()) {
             cv::Mat avatar_to_render = avatar;
             if (mouth_animation != "off") {
-                avatar_to_render = animate_avatar_mouth(avatar, mouth_activity, mouth_y_offset, mouth_x_offset);
+                avatar_to_render = animate_avatar_mouth(
+                    avatar,
+                    mouth_activity,
+                    mouth_y_offset,
+                    mouth_x_offset,
+                    mouth_style,
+                    mouth_gain);
             }
             const cv::Rect overlay_box = grow_rect(face_box, 1.35 * avatar_scale, output.size());
             alpha_blend_into(output, avatar_to_render, overlay_box);
@@ -1354,6 +1442,8 @@ int main(int argc, char** argv) {
         runtime_settings->render_mode = options.render_mode;
         runtime_settings->background_mode = options.background_mode;
         runtime_settings->mouth_animation = options.mouth_animation;
+        runtime_settings->mouth_style = options.mouth_style;
+        runtime_settings->mouth_gain = options.mouth_gain;
         runtime_settings->detect_every = options.detect_every;
         runtime_settings->beauty_strength = options.beauty_strength;
         runtime_settings->avatar_scale = options.avatar_scale;
@@ -1424,22 +1514,26 @@ int main(int argc, char** argv) {
         std::string render_mode;
         std::string background_mode;
         std::string mouth_animation;
+        std::string mouth_style;
         int detect_every = options.detect_every;
         int fps = options.fps;
         double avatar_scale = options.avatar_scale;
         double beauty_strength = options.beauty_strength;
         double mouth_y_offset = options.mouth_y_offset;
         double mouth_x_offset = options.mouth_x_offset;
+        double mouth_gain = options.mouth_gain;
         {
             std::lock_guard<std::mutex> lock(runtime_settings->mutex);
             render_mode = runtime_settings->render_mode;
             background_mode = runtime_settings->background_mode;
             mouth_animation = runtime_settings->mouth_animation;
+            mouth_style = runtime_settings->mouth_style;
             detect_every = runtime_settings->detect_every;
             avatar_scale = runtime_settings->avatar_scale;
             beauty_strength = runtime_settings->beauty_strength;
             mouth_y_offset = runtime_settings->mouth_y_offset;
             mouth_x_offset = runtime_settings->mouth_x_offset;
+            mouth_gain = runtime_settings->mouth_gain;
         }
 
         bool refreshed_face = false;
@@ -1477,8 +1571,10 @@ int main(int argc, char** argv) {
             render_mode,
             background_mode,
             mouth_animation,
+            mouth_style,
             last_face,
             avatar_scale,
+            mouth_gain,
             mouth_y_offset,
             mouth_x_offset,
             mouth_activity,
@@ -1580,6 +1676,11 @@ void clamp_runtime_settings(RuntimeSettings& settings) {
     if (settings.mouth_animation != "off") {
         settings.mouth_animation = "normal";
     }
+    settings.mouth_style = to_lower(settings.mouth_style);
+    if (settings.mouth_style != "soft" && settings.mouth_style != "exaggerated") {
+        settings.mouth_style = "normal";
+    }
+    settings.mouth_gain = std::clamp(settings.mouth_gain, 0.5, 3.0);
     settings.detect_every = std::max(1, settings.detect_every);
     settings.beauty_strength = std::clamp(settings.beauty_strength, 0.0, 1.0);
     settings.avatar_scale = std::clamp(settings.avatar_scale, 0.6, 3.0);
@@ -1623,6 +1724,8 @@ bool persist_runtime_settings(const RuntimeSettings& settings, const std::string
         {"RENDER_MODE", settings.render_mode},
         {"BACKGROUND_MODE", settings.background_mode},
         {"MOUTH_ANIMATION", settings.mouth_animation},
+        {"MOUTH_STYLE", settings.mouth_style},
+        {"MOUTH_GAIN", format_double(settings.mouth_gain, 3)},
         {"DETECT_EVERY", std::to_string(settings.detect_every)},
         {"BEAUTY_STRENGTH", format_double(settings.beauty_strength, 3)},
         {"AVATAR_SCALE", format_double(settings.avatar_scale, 3)},

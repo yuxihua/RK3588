@@ -97,6 +97,8 @@ BACKGROUND_MODE=camera
 AVATAR_SCALE=1.0
 EYE_ANIMATION=off
 MOUTH_ANIMATION=normal
+MOUTH_STYLE=normal
+MOUTH_GAIN=1.0
 MOUTH_Y_OFFSET=0.00
 MOUTH_X_OFFSET=0.00
 MAX_FACES=1
@@ -143,6 +145,12 @@ if ! grep -q '^EYE_ANIMATION=' "$ENV_FILE"; then
 fi
 if ! grep -q '^MOUTH_ANIMATION=' "$ENV_FILE"; then
   echo 'MOUTH_ANIMATION=normal' >> "$ENV_FILE"
+fi
+if ! grep -q '^MOUTH_STYLE=' "$ENV_FILE"; then
+  echo 'MOUTH_STYLE=normal' >> "$ENV_FILE"
+fi
+if ! grep -q '^MOUTH_GAIN=' "$ENV_FILE"; then
+  echo 'MOUTH_GAIN=1.0' >> "$ENV_FILE"
 fi
 if ! grep -q '^MOUTH_Y_OFFSET=' "$ENV_FILE"; then
   echo 'MOUTH_Y_OFFSET=0.00' >> "$ENV_FILE"
@@ -237,6 +245,8 @@ Environment=BACKGROUND_MODE=camera
 Environment=AVATAR_SCALE=1.0
 Environment=EYE_ANIMATION=subtle
 Environment=MOUTH_ANIMATION=normal
+Environment=MOUTH_STYLE=normal
+Environment=MOUTH_GAIN=1.0
 Environment=MOUTH_Y_OFFSET=0.00
 Environment=MOUTH_X_OFFSET=0.00
 Environment=MAX_FACES=1
