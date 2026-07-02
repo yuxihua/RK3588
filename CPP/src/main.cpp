@@ -755,13 +755,30 @@ private:
 };
 
 bool open_camera(const std::string& device, const Options& options, cv::VideoCapture& capture) {
-    const std::vector<std::string> candidates = {
-        device,
-        "/dev/video0",
-        "/dev/video1",
-        "/dev/video2",
-        "/dev/video3",
-    };
+    std::vector<std::string> candidates;
+    if (!device.empty()) {
+        candidates.push_back(device);
+    }
+    candidates.push_back("/dev/video0");
+    candidates.push_back("/dev/video1");
+    candidates.push_back("/dev/video2");
+    candidates.push_back("/dev/video3");
+
+    // On RK boards, real USB capture nodes are often not in 0-3.
+    std::error_code ec;
+    const fs::path dev_dir("/dev");
+    if (fs::exists(dev_dir, ec) && fs::is_directory(dev_dir, ec)) {
+        for (const auto& entry : fs::directory_iterator(dev_dir, ec)) {
+            const std::string name = entry.path().filename().string();
+            if (name.rfind("video", 0) == 0) {
+                candidates.push_back(entry.path().string());
+            }
+        }
+    }
+
+    std::sort(candidates.begin(), candidates.end());
+    candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
+
     for (const auto& candidate : candidates) {
         capture.open(candidate, cv::CAP_V4L2);
         if (capture.isOpened()) {

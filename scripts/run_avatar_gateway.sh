@@ -68,7 +68,7 @@ resolve_camera_device() {
 	done
 
 	local candidate
-	for candidate in /dev/video0 /dev/video1 /dev/video2 /dev/video3 /dev/video4 /dev/video5 /dev/video6 /dev/video7 /dev/video8 /dev/video9; do
+	for candidate in /dev/video*; do
 		if [[ -e "$candidate" ]]; then
 			echo "$candidate"
 			return 0
