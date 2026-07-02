@@ -15,6 +15,7 @@
 #include <mutex>
 #include <limits>
 #include <map>
+#include <set>
 #include <opencv2/opencv.hpp>
 #include <sstream>
 #include <string>
@@ -121,6 +122,8 @@ struct Options {
 
 struct RuntimeSettings {
     std::mutex mutex;
+    std::string avatar_name = "avatar_male";
+    std::string avatar_dir;
     std::string render_mode = "beauty";
     std::string background_mode = "camera";
     std::string mouth_animation = "normal";
@@ -342,6 +345,75 @@ std::string resolve_avatar_path(const Options& options) {
         }
     }
     return {};
+}
+
+std::string resolve_avatar_path_for_name(const std::string& avatar_name,
+                                         const std::string& avatar_dir,
+                                         const std::string& current_avatar_path) {
+    const std::string selected_name = trim(avatar_name);
+    if (selected_name.empty()) {
+        return {};
+    }
+
+    std::vector<std::string> candidate_dirs;
+    if (!avatar_dir.empty()) {
+        candidate_dirs.push_back(avatar_dir);
+    }
+    if (!current_avatar_path.empty()) {
+        candidate_dirs.push_back(fs::path(current_avatar_path).parent_path().string());
+    }
+    candidate_dirs.push_back((fs::path("assets") / "avatars").string());
+    candidate_dirs.push_back("/opt/rk3588-avatar-gateway/assets/avatars");
+
+    std::vector<std::string> candidate_names{selected_name};
+    if (selected_name.size() < 4 || to_lower(selected_name.substr(selected_name.size() - 4)) != ".png") {
+        candidate_names.push_back(selected_name + ".png");
+    }
+
+    for (const auto& dir : candidate_dirs) {
+        for (const auto& name : candidate_names) {
+            const fs::path candidate = fs::path(dir) / name;
+            if (fs::is_regular_file(candidate)) {
+                return candidate.string();
+            }
+        }
+    }
+    return {};
+}
+
+std::vector<std::string> list_available_avatar_names(const std::string& avatar_dir) {
+    std::vector<std::string> search_dirs;
+    if (!avatar_dir.empty()) {
+        search_dirs.push_back(avatar_dir);
+    }
+    search_dirs.push_back((fs::path("assets") / "avatars").string());
+    search_dirs.push_back("/opt/rk3588-avatar-gateway/assets/avatars");
+
+    std::set<std::string> unique_names;
+    for (const auto& dir : search_dirs) {
+        std::error_code ec;
+        const fs::path p(dir);
+        if (!fs::exists(p, ec) || !fs::is_directory(p, ec)) {
+            continue;
+        }
+        for (const auto& entry : fs::directory_iterator(p, ec)) {
+            if (ec || !entry.is_regular_file(ec)) {
+                continue;
+            }
+            std::string filename = entry.path().filename().string();
+            if (filename.empty()) {
+                continue;
+            }
+            const std::string ext = to_lower(entry.path().extension().string());
+            if (ext == ".png") {
+                unique_names.insert(entry.path().stem().string());
+            }
+        }
+    }
+
+    std::vector<std::string> names(unique_names.begin(), unique_names.end());
+    std::sort(names.begin(), names.end());
+    return names;
 }
 
 bool load_avatar(const std::string& path, cv::Mat& avatar) {
@@ -882,6 +954,8 @@ private:
     }
 
     bool send_ui_page(socket_t fd) {
+        std::string avatar_name = "avatar_male";
+        std::string avatar_dir;
         std::string render_mode = "beauty";
         std::string background_mode = "camera";
         std::string mouth_animation = "normal";
@@ -895,6 +969,8 @@ private:
         int network_jpeg_quality = 70;
         if (settings_) {
             std::lock_guard<std::mutex> lock(settings_->mutex);
+            avatar_name = settings_->avatar_name;
+            avatar_dir = settings_->avatar_dir;
             render_mode = settings_->render_mode;
             background_mode = settings_->background_mode;
             mouth_animation = settings_->mouth_animation;
@@ -908,6 +984,12 @@ private:
             network_jpeg_quality = settings_->network_jpeg_quality;
         }
 
+        auto avatar_names = list_available_avatar_names(avatar_dir);
+        if (!avatar_name.empty() && std::find(avatar_names.begin(), avatar_names.end(), avatar_name) == avatar_names.end()) {
+            avatar_names.push_back(avatar_name);
+            std::sort(avatar_names.begin(), avatar_names.end());
+        }
+
         std::ostringstream html;
         html << "<!doctype html><html><head><meta charset='utf-8'><title>Avatar Settings</title>"
              << "<style>body{background:#090c11;color:#f0f4ff;font-family:sans-serif;margin:0;padding:16px;}"
@@ -916,6 +998,13 @@ private:
              << "<h2>Avatar Gateway Settings</h2>"
              << "<div class='row'><img src='" << path_ << "' alt='mjpeg'></div>"
              << "<form method='get' action='/api/settings'>"
+             << "<div class='row'><label>avatar_name</label><select name='avatar_name'>";
+
+        for (const auto& name : avatar_names) {
+            html << "<option value='" << name << "'" << (name == avatar_name ? " selected" : "") << ">" << name << "</option>";
+        }
+
+        html << "</select></div>"
              << "<div class='row'><label>render_mode</label><select name='render_mode'>"
              << "<option value='beauty'" << (render_mode == "beauty" ? " selected" : "") << ">beauty</option>"
              << "<option value='avatar'" << (render_mode == "avatar" ? " selected" : "") << ">avatar</option>"
@@ -960,7 +1049,11 @@ private:
             const auto params = parse_query(query);
             {
                 std::lock_guard<std::mutex> lock(settings_->mutex);
-                auto it = params.find("render_mode");
+                auto it = params.find("avatar_name");
+                if (it != params.end() && !trim(it->second).empty()) {
+                    settings_->avatar_name = trim(it->second);
+                }
+                it = params.find("render_mode");
                 if (it != params.end() && !it->second.empty()) {
                     settings_->render_mode = it->second;
                 }
@@ -1009,6 +1102,7 @@ private:
             persisted = persist_runtime_settings(*settings_, "/etc/default/avatar-gateway");
         }
 
+        std::string avatar_name = "avatar_male";
         std::string render_mode = "beauty";
         std::string background_mode = "camera";
         std::string mouth_animation = "normal";
@@ -1022,6 +1116,7 @@ private:
         int network_jpeg_quality = 70;
         if (settings_) {
             std::lock_guard<std::mutex> lock(settings_->mutex);
+            avatar_name = settings_->avatar_name;
             render_mode = settings_->render_mode;
             background_mode = settings_->background_mode;
             mouth_animation = settings_->mouth_animation;
@@ -1037,6 +1132,7 @@ private:
 
         std::ostringstream body;
         body << "{"
+               << "\"avatar_name\":\"" << json_escape(avatar_name) << "\"," 
              << "\"render_mode\":\"" << json_escape(render_mode) << "\"," 
              << "\"background_mode\":\"" << json_escape(background_mode) << "\"," 
                << "\"mouth_animation\":\"" << json_escape(mouth_animation) << "\"," 
@@ -1439,6 +1535,8 @@ int main(int argc, char** argv) {
     auto runtime_settings = std::make_shared<RuntimeSettings>();
     {
         std::lock_guard<std::mutex> lock(runtime_settings->mutex);
+        runtime_settings->avatar_name = options.avatar_name;
+        runtime_settings->avatar_dir = options.avatar_dir;
         runtime_settings->render_mode = options.render_mode;
         runtime_settings->background_mode = options.background_mode;
         runtime_settings->mouth_animation = options.mouth_animation;
@@ -1480,6 +1578,7 @@ int main(int argc, char** argv) {
 
     std::string current_avatar_path = avatar_path;
     cv::Mat current_avatar = avatar;
+    std::string active_avatar_name = options.avatar_name;
     cv::Rect last_face;
     int last_face_hold = 0;
     int detect_miss_streak = 0;
@@ -1513,6 +1612,7 @@ int main(int argc, char** argv) {
 
         std::string render_mode;
         std::string background_mode;
+        std::string requested_avatar_name;
         std::string mouth_animation;
         std::string mouth_style;
         int detect_every = options.detect_every;
@@ -1524,6 +1624,7 @@ int main(int argc, char** argv) {
         double mouth_gain = options.mouth_gain;
         {
             std::lock_guard<std::mutex> lock(runtime_settings->mutex);
+            requested_avatar_name = runtime_settings->avatar_name;
             render_mode = runtime_settings->render_mode;
             background_mode = runtime_settings->background_mode;
             mouth_animation = runtime_settings->mouth_animation;
@@ -1534,6 +1635,20 @@ int main(int argc, char** argv) {
             mouth_y_offset = runtime_settings->mouth_y_offset;
             mouth_x_offset = runtime_settings->mouth_x_offset;
             mouth_gain = runtime_settings->mouth_gain;
+        }
+
+        const std::string normalized_avatar_name = trim(requested_avatar_name);
+        if (!normalized_avatar_name.empty() && normalized_avatar_name != active_avatar_name) {
+            const std::string candidate = resolve_avatar_path_for_name(
+                normalized_avatar_name,
+                options.avatar_dir,
+                current_avatar_path);
+            cv::Mat loaded;
+            if (!candidate.empty() && load_avatar(candidate, loaded)) {
+                current_avatar = loaded;
+                current_avatar_path = candidate;
+                active_avatar_name = normalized_avatar_name;
+            }
         }
 
         bool refreshed_face = false;
@@ -1670,6 +1785,10 @@ std::map<std::string, std::string> parse_query(const std::string& query) {
 }
 
 void clamp_runtime_settings(RuntimeSettings& settings) {
+    settings.avatar_name = trim(settings.avatar_name);
+    if (settings.avatar_name.empty()) {
+        settings.avatar_name = "avatar_male";
+    }
     settings.render_mode = to_lower(settings.render_mode);
     settings.background_mode = to_lower(settings.background_mode);
     settings.mouth_animation = to_lower(settings.mouth_animation);
@@ -1721,6 +1840,7 @@ bool persist_runtime_settings(const RuntimeSettings& settings, const std::string
     }
 
     const std::vector<std::pair<std::string, std::string>> updates = {
+        {"AVATAR_NAME", settings.avatar_name},
         {"RENDER_MODE", settings.render_mode},
         {"BACKGROUND_MODE", settings.background_mode},
         {"MOUTH_ANIMATION", settings.mouth_animation},
