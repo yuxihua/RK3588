@@ -428,14 +428,44 @@ bool load_avatar(const std::string& path, cv::Mat& avatar) {
     }
     if (image.channels() == 3) {
         cv::cvtColor(image, avatar, cv::COLOR_BGR2BGRA);
-        return true;
-    }
-    if (image.channels() == 4) {
+    } else if (image.channels() == 4) {
         avatar = image;
-        return true;
+    } else {
+        avatar.release();
+        return false;
     }
-    avatar.release();
-    return false;
+
+    // Apply a soft oval alpha mask to suppress hard rectangular edges and neck blocks
+    // commonly seen in portrait PNGs not prepared for face-overlay use.
+    if (avatar.channels() == 4) {
+        std::vector<cv::Mat> channels;
+        cv::split(avatar, channels);
+        cv::Mat alpha = channels[3].clone();
+
+        cv::Mat oval_mask(alpha.size(), CV_8UC1, cv::Scalar(0));
+        const cv::Point center(alpha.cols / 2, static_cast<int>(alpha.rows * 0.48));
+        const cv::Size axes(
+            std::max(2, static_cast<int>(alpha.cols * 0.43)),
+            std::max(2, static_cast<int>(alpha.rows * 0.48)));
+        cv::ellipse(oval_mask, center, axes, 0.0, 0.0, 360.0, cv::Scalar(255), -1, cv::LINE_AA);
+        cv::GaussianBlur(oval_mask, oval_mask, cv::Size(11, 11), 0.0);
+
+        // Additional bottom fade avoids visible straight neck/chest cut lines.
+        for (int y = 0; y < oval_mask.rows; ++y) {
+            const double t = static_cast<double>(y) / std::max(1, oval_mask.rows - 1);
+            const double keep = (t < 0.68) ? 1.0 : std::clamp(1.0 - (t - 0.68) / 0.32, 0.0, 1.0);
+            auto* row = oval_mask.ptr<std::uint8_t>(y);
+            for (int x = 0; x < oval_mask.cols; ++x) {
+                row[x] = static_cast<std::uint8_t>(row[x] * keep);
+            }
+        }
+
+        cv::Mat merged_alpha;
+        cv::multiply(alpha, oval_mask, merged_alpha, 1.0 / 255.0);
+        channels[3] = merged_alpha;
+        cv::merge(channels, avatar);
+    }
+    return true;
 }
 
 std::string find_cascade_file(const std::string& name) {
@@ -1480,7 +1510,11 @@ cv::Mat build_output_frame(const cv::Mat& frame,
                     mouth_style,
                     mouth_gain);
             }
-            const cv::Rect overlay_box = grow_rect(face_box, 1.35 * avatar_scale, output.size());
+            // Slightly tighter and upward overlay improves face alignment for portrait avatars.
+            cv::Rect overlay_box = grow_rect(face_box, 1.12 * avatar_scale, output.size());
+            const int up_shift = static_cast<int>(overlay_box.height * 0.10);
+            overlay_box.y = std::max(0, overlay_box.y - up_shift);
+            overlay_box &= cv::Rect(0, 0, output.cols, output.rows);
             alpha_blend_into(output, avatar_to_render, overlay_box);
         } else if (!virtual_background) {
             output = apply_beauty(output, beauty_strength * 0.6);
