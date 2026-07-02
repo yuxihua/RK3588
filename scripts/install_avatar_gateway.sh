@@ -19,6 +19,12 @@ cp -a "$PROJECT_ROOT"/. "$INSTALL_ROOT"/
 chmod +x "$INSTALL_ROOT"/scripts/*.sh "$INSTALL_ROOT"/scripts/*.py
 install -d "$INSTALL_ROOT/assets/avatars"
 
+# Remove build caches copied from other machines (for example, Windows)
+# to avoid CMake source/cache mismatch on target boards.
+rm -rf "$INSTALL_ROOT/CPP/build" \
+       "$INSTALL_ROOT/CPP/build-clang" \
+       "$INSTALL_ROOT/CPP/build-mingw"
+
 if command -v cmake >/dev/null 2>&1 && command -v g++ >/dev/null 2>&1; then
   if [[ -f "$INSTALL_ROOT/CPP/CMakeLists.txt" ]]; then
     cmake -S "$INSTALL_ROOT/CPP" -B "$INSTALL_ROOT/CPP/build"
