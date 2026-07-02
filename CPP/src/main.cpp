@@ -1448,12 +1448,13 @@ cv::Mat animate_avatar_mouth(const cv::Mat& avatar,
         const double band = 1.0 - std::abs(t - 0.5) * 2.0;
         auto* dst_px = dst_roi.ptr<cv::Vec4b>(y);
         const auto* line_px = lip_line.ptr<cv::Vec4b>(0);
+        const auto* src_px = src_roi.ptr<cv::Vec4b>(std::clamp(y, 0, src_roi.rows - 1));
         for (int x = 0; x < dst_roi.cols; ++x) {
-            const double darken = std::clamp(0.15 + 0.25 * band, 0.0, 0.45);
-            dst_px[x][0] = static_cast<std::uint8_t>(line_px[x][0] * (1.0 - darken));
-            dst_px[x][1] = static_cast<std::uint8_t>(line_px[x][1] * (1.0 - darken));
-            dst_px[x][2] = static_cast<std::uint8_t>(line_px[x][2] * (1.0 - darken));
-            dst_px[x][3] = line_px[x][3];
+            const double blend = std::clamp(0.18 + 0.30 * band, 0.0, 0.52);
+            dst_px[x][0] = static_cast<std::uint8_t>(src_px[x][0] * (1.0 - blend) + line_px[x][0] * blend);
+            dst_px[x][1] = static_cast<std::uint8_t>(src_px[x][1] * (1.0 - blend) + line_px[x][1] * blend);
+            dst_px[x][2] = static_cast<std::uint8_t>(src_px[x][2] * (1.0 - blend) + line_px[x][2] * blend);
+            dst_px[x][3] = std::max(src_px[x][3], line_px[x][3]);
         }
     }
 
