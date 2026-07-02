@@ -1441,20 +1441,20 @@ cv::Mat animate_avatar_mouth(const cv::Mat& avatar,
 
     const int gap_y0 = std::clamp(split_y - top_shift, 0, dst_roi.rows - 1);
     const int gap_y1 = std::clamp(split_y + bottom_shift, 0, dst_roi.rows - 1);
-    cv::Mat lip_line = src_roi.row(split_y).clone();
-    cv::GaussianBlur(lip_line, lip_line, cv::Size(9, 1), 0.0);
+    const int upper_src_y = std::clamp(gap_y0 - 1, 0, src_roi.rows - 1);
+    const int lower_src_y = std::clamp(gap_y1 + 1, 0, src_roi.rows - 1);
+    const auto* upper_px = src_roi.ptr<cv::Vec4b>(upper_src_y);
+    const auto* lower_px = src_roi.ptr<cv::Vec4b>(lower_src_y);
     for (int y = gap_y0; y <= gap_y1; ++y) {
-        const double t = (gap_y1 > gap_y0) ? static_cast<double>(y - gap_y0) / (gap_y1 - gap_y0) : 0.5;
-        const double band = 1.0 - std::abs(t - 0.5) * 2.0;
+        const double t = (gap_y1 > gap_y0)
+            ? static_cast<double>(y - gap_y0) / (gap_y1 - gap_y0)
+            : 0.5;
         auto* dst_px = dst_roi.ptr<cv::Vec4b>(y);
-        const auto* line_px = lip_line.ptr<cv::Vec4b>(0);
-        const auto* src_px = src_roi.ptr<cv::Vec4b>(std::clamp(y, 0, src_roi.rows - 1));
         for (int x = 0; x < dst_roi.cols; ++x) {
-            const double blend = std::clamp(0.18 + 0.30 * band, 0.0, 0.52);
-            dst_px[x][0] = static_cast<std::uint8_t>(src_px[x][0] * (1.0 - blend) + line_px[x][0] * blend);
-            dst_px[x][1] = static_cast<std::uint8_t>(src_px[x][1] * (1.0 - blend) + line_px[x][1] * blend);
-            dst_px[x][2] = static_cast<std::uint8_t>(src_px[x][2] * (1.0 - blend) + line_px[x][2] * blend);
-            dst_px[x][3] = std::max(src_px[x][3], line_px[x][3]);
+            dst_px[x][0] = static_cast<std::uint8_t>(upper_px[x][0] * (1.0 - t) + lower_px[x][0] * t);
+            dst_px[x][1] = static_cast<std::uint8_t>(upper_px[x][1] * (1.0 - t) + lower_px[x][1] * t);
+            dst_px[x][2] = static_cast<std::uint8_t>(upper_px[x][2] * (1.0 - t) + lower_px[x][2] * t);
+            dst_px[x][3] = static_cast<std::uint8_t>(upper_px[x][3] * (1.0 - t) + lower_px[x][3] * t);
         }
     }
 
