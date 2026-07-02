@@ -1209,16 +1209,16 @@ double estimate_mouth_activity(const cv::Mat& frame,
     if (!previous_mouth_patch.empty() && previous_mouth_patch.size() == mouth_gray.size()) {
         cv::Mat diff;
         cv::absdiff(mouth_gray, previous_mouth_patch, diff);
-        motion = cv::mean(diff)[0] / 30.0;
+        motion = cv::mean(diff)[0] / 18.0;
     }
 
     cv::Scalar mean_value, stddev;
     cv::meanStdDev(mouth_gray, mean_value, stddev);
-    const double texture = stddev[0] / 40.0;
+    const double texture = stddev[0] / 28.0;
     previous_mouth_patch = mouth_gray;
 
-    const double activity = std::clamp(0.75 * motion + 0.25 * texture, 0.0, 1.0);
-    return std::clamp(previous_activity * 0.78 + activity * 0.22, 0.0, 1.0);
+    const double activity = std::clamp(0.85 * motion + 0.15 * texture, 0.0, 1.0);
+    return std::clamp(previous_activity * 0.62 + activity * 0.38, 0.0, 1.0);
 }
 
 cv::Mat animate_avatar_mouth(const cv::Mat& avatar,
@@ -1229,42 +1229,46 @@ cv::Mat animate_avatar_mouth(const cv::Mat& avatar,
         return avatar;
     }
 
-    cv::Mat animated = avatar.clone();
+    cv::Mat animated;
+    if (avatar.channels() == 4) {
+        animated = avatar.clone();
+    } else {
+        cv::cvtColor(avatar, animated, cv::COLOR_BGR2BGRA);
+    }
+
     const int w = animated.cols;
     const int h = animated.rows;
-    const int mouth_w = std::max(10, static_cast<int>(w * 0.44));
-    const int mouth_h = std::max(8, static_cast<int>(h * 0.20));
-    const int mouth_x = std::clamp(static_cast<int>(w * 0.28 + mouth_x_offset * w * 0.08), 0, std::max(0, w - mouth_w));
-    const int mouth_y = std::clamp(static_cast<int>(h * 0.62 + mouth_y_offset * h * 0.10), 0, std::max(0, h - mouth_h));
+    const int mouth_w = std::max(10, static_cast<int>(w * 0.40));
+    const int mouth_h = std::max(8, static_cast<int>(h * 0.18));
+    const int mouth_x = std::clamp(static_cast<int>(w * 0.30 + mouth_x_offset * w * 0.10), 0, std::max(0, w - mouth_w));
+    const int mouth_y = std::clamp(static_cast<int>(h * 0.66 + mouth_y_offset * h * 0.12), 0, std::max(0, h - mouth_h));
     const cv::Rect mouth_rect(mouth_x, mouth_y, mouth_w, mouth_h);
 
-    cv::Mat mouth_patch = animated(mouth_rect).clone();
-    const int opened_h = std::min(h - mouth_rect.y,
-                                  static_cast<int>(mouth_rect.height * (1.0 + 0.70 * mouth_activity)));
-    if (opened_h <= mouth_rect.height) {
-        return animated;
+    cv::Mat roi = animated(mouth_rect);
+    cv::Mat mask = cv::Mat::zeros(mouth_rect.height, mouth_rect.width, CV_8UC1);
+
+    const double open_level = std::clamp((mouth_activity - 0.04) * 1.9, 0.0, 1.0);
+    const int axis_x = std::max(3, static_cast<int>(mouth_rect.width * 0.26));
+    const int axis_y = std::max(2, static_cast<int>(mouth_rect.height * (0.08 + 0.38 * open_level)));
+    const cv::Point center(mouth_rect.width / 2, static_cast<int>(mouth_rect.height * 0.55));
+    cv::ellipse(mask, center, cv::Size(axis_x, axis_y), 0.0, 0.0, 360.0, cv::Scalar(255), -1, cv::LINE_AA);
+
+    const cv::Vec3f mouth_color(22.0f, 20.0f, 58.0f);
+    const float strength_base = static_cast<float>(0.35 + 0.45 * open_level);
+    for (int y = 0; y < roi.rows; ++y) {
+        auto* px = roi.ptr<cv::Vec4b>(y);
+        const auto* mk = mask.ptr<std::uint8_t>(y);
+        for (int x = 0; x < roi.cols; ++x) {
+            if (mk[x] == 0) {
+                continue;
+            }
+            const float alpha = (mk[x] / 255.0f) * strength_base;
+            px[x][0] = static_cast<std::uint8_t>(px[x][0] * (1.0f - alpha) + mouth_color[0] * alpha);
+            px[x][1] = static_cast<std::uint8_t>(px[x][1] * (1.0f - alpha) + mouth_color[1] * alpha);
+            px[x][2] = static_cast<std::uint8_t>(px[x][2] * (1.0f - alpha) + mouth_color[2] * alpha);
+        }
     }
 
-    cv::Mat stretched;
-    cv::resize(mouth_patch, stretched, cv::Size(mouth_rect.width, opened_h), 0, 0, cv::INTER_LINEAR);
-    cv::Rect dst(mouth_rect.x,
-                 std::clamp(mouth_rect.y + static_cast<int>(mouth_activity * h * 0.04), 0, h - 1),
-                 mouth_rect.width,
-                 std::min(opened_h, h - mouth_rect.y));
-    dst &= cv::Rect(0, 0, w, h);
-    if (dst.width <= 0 || dst.height <= 0) {
-        return animated;
-    }
-
-    cv::Mat stretched_cropped = stretched(cv::Rect(0, 0, dst.width, dst.height));
-    if (stretched_cropped.channels() == 4 && animated.channels() == 4) {
-        std::vector<cv::Mat> channels;
-        cv::split(stretched_cropped, channels);
-        const cv::Mat& alpha = channels[3];
-        stretched_cropped.copyTo(animated(dst), alpha);
-    } else {
-        stretched_cropped.copyTo(animated(dst));
-    }
     return animated;
 }
 
