@@ -1,0 +1,3 @@
+C:/data/BaiduSyncdisk/2026/直播课堂/RK3588/CPP/build-clang/CMakeFiles/avatar_gateway.dir
+C:/data/BaiduSyncdisk/2026/直播课堂/RK3588/CPP/build-clang/CMakeFiles/edit_cache.dir
+C:/data/BaiduSyncdisk/2026/直播课堂/RK3588/CPP/build-clang/CMakeFiles/rebuild_cache.dir

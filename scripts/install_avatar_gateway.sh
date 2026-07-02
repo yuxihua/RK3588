@@ -19,6 +19,13 @@ cp -a "$PROJECT_ROOT"/. "$INSTALL_ROOT"/
 chmod +x "$INSTALL_ROOT"/scripts/*.sh "$INSTALL_ROOT"/scripts/*.py
 install -d "$INSTALL_ROOT/assets/avatars"
 
+if command -v cmake >/dev/null 2>&1 && command -v g++ >/dev/null 2>&1; then
+  if [[ -f "$INSTALL_ROOT/CPP/CMakeLists.txt" ]]; then
+    cmake -S "$INSTALL_ROOT/CPP" -B "$INSTALL_ROOT/CPP/build"
+    cmake --build "$INSTALL_ROOT/CPP/build" -j
+  fi
+fi
+
 install -d "$USBDEVICE_OVERRIDE_DIR"
 cat > "$USBDEVICE_OVERRIDE_FILE" <<'EOF'
 #!/bin/sh

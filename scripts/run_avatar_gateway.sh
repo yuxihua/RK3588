@@ -118,4 +118,9 @@ if [[ "$GPIO_AVATAR_SELECT" == "1" || "$GPIO_AVATAR_SELECT" == "true" || "$GPIO_
 	ARGS+=(--gpio-avatar-select)
 fi
 
+CPP_BIN="$ROOT_DIR/CPP/build/avatar_gateway"
+if [[ -x "$CPP_BIN" ]]; then
+	exec "$CPP_BIN" "${ARGS[@]}" "$@"
+fi
+
 exec "$PYTHON_BIN" "$ROOT_DIR/scripts/avatar_processor.py" "${ARGS[@]}" "$@"
