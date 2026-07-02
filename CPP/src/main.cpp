@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -8,6 +9,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -119,6 +121,7 @@ struct RuntimeSettings {
     std::mutex mutex;
     std::string render_mode = "beauty";
     std::string background_mode = "camera";
+    std::string mouth_animation = "normal";
     int detect_every = 2;
     double beauty_strength = 0.45;
     double avatar_scale = 1.0;
@@ -150,6 +153,8 @@ std::string trim(std::string value) {
 std::string json_escape(const std::string& input);
 std::map<std::string, std::string> parse_query(const std::string& query);
 void clamp_runtime_settings(RuntimeSettings& settings);
+bool persist_runtime_settings(const RuntimeSettings& settings, const std::string& env_file);
+std::string format_double(double value, int precision);
 
 bool parse_int(const std::string& text, int& value) {
     try {
@@ -551,7 +556,8 @@ cv::Rect choose_best_face(const std::vector<cv::Rect>& faces, const cv::Rect& pr
 cv::Rect detect_face_robust(const cv::Mat& frame,
                             cv::CascadeClassifier& frontal,
                             cv::CascadeClassifier& profile,
-                            const cv::Rect& previous_face) {
+                            const cv::Rect& previous_face,
+                            bool allow_expensive_rotation) {
     if (frontal.empty() && profile.empty()) {
         return {};
     }
@@ -560,37 +566,58 @@ cv::Rect detect_face_robust(const cv::Mat& frame,
     cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
     cv::equalizeHist(gray, gray);
 
+    const double downscale = std::max(1.0, std::max(gray.cols / 320.0, gray.rows / 240.0));
+    cv::Mat work = gray;
+    if (downscale > 1.0) {
+        cv::resize(gray, work,
+                   cv::Size(static_cast<int>(gray.cols / downscale), static_cast<int>(gray.rows / downscale)),
+                   0, 0, cv::INTER_AREA);
+    }
+
     std::vector<cv::Rect> candidates;
-    const cv::Size min_size(42, 42);
-    detect_with_cascade(gray, frontal, candidates, 1.1, 3, min_size);
-    detect_with_cascade(gray, profile, candidates, 1.1, 3, min_size);
+    const cv::Size min_size(std::max(18, static_cast<int>(42 / downscale)),
+                            std::max(18, static_cast<int>(42 / downscale)));
+    detect_with_cascade(work, frontal, candidates, 1.1, 3, min_size);
+    detect_with_cascade(work, profile, candidates, 1.1, 3, min_size);
 
     // Mirror pass lets a single profile model detect both left and right profiles.
     cv::Mat gray_flipped;
-    cv::flip(gray, gray_flipped, 1);
+    cv::flip(work, gray_flipped, 1);
     std::vector<cv::Rect> flipped_faces;
     detect_with_cascade(gray_flipped, profile, flipped_faces, 1.1, 3, min_size);
     for (const auto& f : flipped_faces) {
-        candidates.emplace_back(gray.cols - f.x - f.width, f.y, f.width, f.height);
+        candidates.emplace_back(work.cols - f.x - f.width, f.y, f.width, f.height);
     }
 
-    // Small-angle rotation helps with head tilt and slight bowing.
-    const std::array<double, 4> angles = {-18.0, -10.0, 10.0, 18.0};
-    for (double angle : angles) {
-        const cv::Point2f center(gray.cols * 0.5F, gray.rows * 0.5F);
-        const cv::Mat affine = cv::getRotationMatrix2D(center, angle, 1.0);
-        cv::Mat rotated;
-        cv::warpAffine(gray, rotated, affine, gray.size(), cv::INTER_LINEAR, cv::BORDER_REPLICATE);
-        std::vector<cv::Rect> rotated_faces;
-        detect_with_cascade(rotated, frontal, rotated_faces, 1.1, 3, min_size);
+    if (allow_expensive_rotation) {
+        // Rotation fallback is only enabled after consecutive misses to keep CPU lower.
+        const std::array<double, 2> angles = {-12.0, 12.0};
+        for (double angle : angles) {
+            const cv::Point2f center(work.cols * 0.5F, work.rows * 0.5F);
+            const cv::Mat affine = cv::getRotationMatrix2D(center, angle, 1.0);
+            cv::Mat rotated;
+            cv::warpAffine(work, rotated, affine, work.size(), cv::INTER_LINEAR, cv::BORDER_REPLICATE);
+            std::vector<cv::Rect> rotated_faces;
+            detect_with_cascade(rotated, frontal, rotated_faces, 1.1, 3, min_size);
 
-        cv::Mat inverse_affine;
-        cv::invertAffineTransform(affine, inverse_affine);
-        for (const auto& rf : rotated_faces) {
-            const cv::Rect mapped = map_rotated_rect_to_original(rf, inverse_affine, frame.size());
-            if (!mapped.empty()) {
-                candidates.push_back(mapped);
+            cv::Mat inverse_affine;
+            cv::invertAffineTransform(affine, inverse_affine);
+            for (const auto& rf : rotated_faces) {
+                const cv::Rect mapped = map_rotated_rect_to_original(rf, inverse_affine, work.size());
+                if (!mapped.empty()) {
+                    candidates.push_back(mapped);
+                }
             }
+        }
+    }
+
+    if (downscale > 1.0) {
+        for (auto& rect : candidates) {
+            rect.x = static_cast<int>(rect.x * downscale);
+            rect.y = static_cast<int>(rect.y * downscale);
+            rect.width = static_cast<int>(rect.width * downscale);
+            rect.height = static_cast<int>(rect.height * downscale);
+            rect &= cv::Rect(0, 0, frame.cols, frame.rows);
         }
     }
 
@@ -847,6 +874,7 @@ private:
     bool send_ui_page(socket_t fd) {
         std::string render_mode = "beauty";
         std::string background_mode = "camera";
+        std::string mouth_animation = "normal";
         int detect_every = 2;
         double beauty_strength = 0.45;
         double avatar_scale = 1.0;
@@ -857,6 +885,7 @@ private:
             std::lock_guard<std::mutex> lock(settings_->mutex);
             render_mode = settings_->render_mode;
             background_mode = settings_->background_mode;
+            mouth_animation = settings_->mouth_animation;
             detect_every = settings_->detect_every;
             beauty_strength = settings_->beauty_strength;
             avatar_scale = settings_->avatar_scale;
@@ -881,6 +910,10 @@ private:
              << "<option value='camera'" << (background_mode == "camera" ? " selected" : "") << ">camera</option>"
              << "<option value='virtual'" << (background_mode == "virtual" ? " selected" : "") << ">virtual</option>"
              << "</select></div>"
+             << "<div class='row'><label>mouth_animation</label><select name='mouth_animation'>"
+             << "<option value='normal'" << (mouth_animation == "normal" ? " selected" : "") << ">normal</option>"
+             << "<option value='off'" << (mouth_animation == "off" ? " selected" : "") << ">off</option>"
+             << "</select></div>"
              << "<div class='row'><label>beauty_strength</label><input name='beauty_strength' value='" << beauty_strength << "'></div>"
              << "<div class='row'><label>avatar_scale</label><input name='avatar_scale' value='" << avatar_scale << "'></div>"
              << "<div class='row'><label>mouth_y_offset</label><input name='mouth_y_offset' value='" << mouth_y_offset << "'></div>"
@@ -902,46 +935,55 @@ private:
     }
 
     bool send_settings_json(socket_t fd, const std::string& query) {
+        bool persisted = true;
         if (settings_) {
             const auto params = parse_query(query);
-            std::lock_guard<std::mutex> lock(settings_->mutex);
-            auto it = params.find("render_mode");
-            if (it != params.end() && !it->second.empty()) {
-                settings_->render_mode = it->second;
+            {
+                std::lock_guard<std::mutex> lock(settings_->mutex);
+                auto it = params.find("render_mode");
+                if (it != params.end() && !it->second.empty()) {
+                    settings_->render_mode = it->second;
+                }
+                it = params.find("background_mode");
+                if (it != params.end() && !it->second.empty()) {
+                    settings_->background_mode = it->second;
+                }
+                it = params.find("mouth_animation");
+                if (it != params.end() && !it->second.empty()) {
+                    settings_->mouth_animation = it->second;
+                }
+                it = params.find("detect_every");
+                if (it != params.end()) {
+                    parse_int(it->second, settings_->detect_every);
+                }
+                it = params.find("network_jpeg_quality");
+                if (it != params.end()) {
+                    parse_int(it->second, settings_->network_jpeg_quality);
+                }
+                it = params.find("beauty_strength");
+                if (it != params.end()) {
+                    parse_double(it->second, settings_->beauty_strength);
+                }
+                it = params.find("avatar_scale");
+                if (it != params.end()) {
+                    parse_double(it->second, settings_->avatar_scale);
+                }
+                it = params.find("mouth_y_offset");
+                if (it != params.end()) {
+                    parse_double(it->second, settings_->mouth_y_offset);
+                }
+                it = params.find("mouth_x_offset");
+                if (it != params.end()) {
+                    parse_double(it->second, settings_->mouth_x_offset);
+                }
+                clamp_runtime_settings(*settings_);
             }
-            it = params.find("background_mode");
-            if (it != params.end() && !it->second.empty()) {
-                settings_->background_mode = it->second;
-            }
-            it = params.find("detect_every");
-            if (it != params.end()) {
-                parse_int(it->second, settings_->detect_every);
-            }
-            it = params.find("network_jpeg_quality");
-            if (it != params.end()) {
-                parse_int(it->second, settings_->network_jpeg_quality);
-            }
-            it = params.find("beauty_strength");
-            if (it != params.end()) {
-                parse_double(it->second, settings_->beauty_strength);
-            }
-            it = params.find("avatar_scale");
-            if (it != params.end()) {
-                parse_double(it->second, settings_->avatar_scale);
-            }
-            it = params.find("mouth_y_offset");
-            if (it != params.end()) {
-                parse_double(it->second, settings_->mouth_y_offset);
-            }
-            it = params.find("mouth_x_offset");
-            if (it != params.end()) {
-                parse_double(it->second, settings_->mouth_x_offset);
-            }
-            clamp_runtime_settings(*settings_);
+            persisted = persist_runtime_settings(*settings_, "/etc/default/avatar-gateway");
         }
 
         std::string render_mode = "beauty";
         std::string background_mode = "camera";
+        std::string mouth_animation = "normal";
         int detect_every = 2;
         double beauty_strength = 0.45;
         double avatar_scale = 1.0;
@@ -952,6 +994,7 @@ private:
             std::lock_guard<std::mutex> lock(settings_->mutex);
             render_mode = settings_->render_mode;
             background_mode = settings_->background_mode;
+            mouth_animation = settings_->mouth_animation;
             detect_every = settings_->detect_every;
             beauty_strength = settings_->beauty_strength;
             avatar_scale = settings_->avatar_scale;
@@ -964,12 +1007,14 @@ private:
         body << "{"
              << "\"render_mode\":\"" << json_escape(render_mode) << "\"," 
              << "\"background_mode\":\"" << json_escape(background_mode) << "\"," 
+               << "\"mouth_animation\":\"" << json_escape(mouth_animation) << "\"," 
              << "\"detect_every\":" << detect_every << ","
              << "\"beauty_strength\":" << beauty_strength << ","
              << "\"avatar_scale\":" << avatar_scale << ","
              << "\"mouth_y_offset\":" << mouth_y_offset << ","
              << "\"mouth_x_offset\":" << mouth_x_offset << ","
-             << "\"network_jpeg_quality\":" << network_jpeg_quality
+               << "\"network_jpeg_quality\":" << network_jpeg_quality << ","
+               << "\"persisted\":" << (persisted ? "true" : "false")
              << "}";
 
         std::ostringstream response;
@@ -1137,12 +1182,101 @@ bool open_writer(const Options& options, cv::VideoWriter& writer) {
     return false;
 }
 
+double estimate_mouth_activity(const cv::Mat& frame,
+                              const cv::Rect& face_box,
+                              cv::Mat& previous_mouth_patch,
+                              double previous_activity) {
+    if (frame.empty() || face_box.empty()) {
+        previous_mouth_patch.release();
+        return previous_activity * 0.85;
+    }
+
+    const int mouth_w = std::max(12, static_cast<int>(face_box.width * 0.50));
+    const int mouth_h = std::max(10, static_cast<int>(face_box.height * 0.24));
+    const int mouth_x = face_box.x + (face_box.width - mouth_w) / 2;
+    const int mouth_y = face_box.y + static_cast<int>(face_box.height * 0.64);
+    cv::Rect mouth_roi(mouth_x, mouth_y, mouth_w, mouth_h);
+    mouth_roi &= cv::Rect(0, 0, frame.cols, frame.rows);
+    if (mouth_roi.width < 8 || mouth_roi.height < 8) {
+        return previous_activity * 0.90;
+    }
+
+    cv::Mat mouth_gray;
+    cv::cvtColor(frame(mouth_roi), mouth_gray, cv::COLOR_BGR2GRAY);
+    cv::resize(mouth_gray, mouth_gray, cv::Size(32, 16), 0, 0, cv::INTER_AREA);
+
+    double motion = 0.0;
+    if (!previous_mouth_patch.empty() && previous_mouth_patch.size() == mouth_gray.size()) {
+        cv::Mat diff;
+        cv::absdiff(mouth_gray, previous_mouth_patch, diff);
+        motion = cv::mean(diff)[0] / 30.0;
+    }
+
+    cv::Scalar mean_value, stddev;
+    cv::meanStdDev(mouth_gray, mean_value, stddev);
+    const double texture = stddev[0] / 40.0;
+    previous_mouth_patch = mouth_gray;
+
+    const double activity = std::clamp(0.75 * motion + 0.25 * texture, 0.0, 1.0);
+    return std::clamp(previous_activity * 0.78 + activity * 0.22, 0.0, 1.0);
+}
+
+cv::Mat animate_avatar_mouth(const cv::Mat& avatar,
+                             double mouth_activity,
+                             double mouth_y_offset,
+                             double mouth_x_offset) {
+    if (avatar.empty() || mouth_activity < 0.02) {
+        return avatar;
+    }
+
+    cv::Mat animated = avatar.clone();
+    const int w = animated.cols;
+    const int h = animated.rows;
+    const int mouth_w = std::max(10, static_cast<int>(w * 0.44));
+    const int mouth_h = std::max(8, static_cast<int>(h * 0.20));
+    const int mouth_x = std::clamp(static_cast<int>(w * 0.28 + mouth_x_offset * w * 0.08), 0, std::max(0, w - mouth_w));
+    const int mouth_y = std::clamp(static_cast<int>(h * 0.62 + mouth_y_offset * h * 0.10), 0, std::max(0, h - mouth_h));
+    const cv::Rect mouth_rect(mouth_x, mouth_y, mouth_w, mouth_h);
+
+    cv::Mat mouth_patch = animated(mouth_rect).clone();
+    const int opened_h = std::min(h - mouth_rect.y,
+                                  static_cast<int>(mouth_rect.height * (1.0 + 0.70 * mouth_activity)));
+    if (opened_h <= mouth_rect.height) {
+        return animated;
+    }
+
+    cv::Mat stretched;
+    cv::resize(mouth_patch, stretched, cv::Size(mouth_rect.width, opened_h), 0, 0, cv::INTER_LINEAR);
+    cv::Rect dst(mouth_rect.x,
+                 std::clamp(mouth_rect.y + static_cast<int>(mouth_activity * h * 0.04), 0, h - 1),
+                 mouth_rect.width,
+                 std::min(opened_h, h - mouth_rect.y));
+    dst &= cv::Rect(0, 0, w, h);
+    if (dst.width <= 0 || dst.height <= 0) {
+        return animated;
+    }
+
+    cv::Mat stretched_cropped = stretched(cv::Rect(0, 0, dst.width, dst.height));
+    if (stretched_cropped.channels() == 4) {
+        std::vector<cv::Mat> channels;
+        cv::split(stretched_cropped, channels);
+        channels[3].copyTo(animated(dst), channels[3]);
+    } else {
+        stretched_cropped.copyTo(animated(dst));
+    }
+    return animated;
+}
+
 cv::Mat build_output_frame(const cv::Mat& frame,
                            const cv::Mat& avatar,
                            const std::string& render_mode,
                            const std::string& background_mode,
+                           const std::string& mouth_animation,
                            const cv::Rect& face_box,
                            double avatar_scale,
+                           double mouth_y_offset,
+                           double mouth_x_offset,
+                           double mouth_activity,
                            double beauty_strength) {
     const bool avatar_mode = render_mode == "avatar";
     const bool virtual_background = background_mode == "virtual";
@@ -1154,8 +1288,12 @@ cv::Mat build_output_frame(const cv::Mat& frame,
 
     if (avatar_mode) {
         if (!avatar.empty() && !face_box.empty()) {
+            cv::Mat avatar_to_render = avatar;
+            if (mouth_animation != "off") {
+                avatar_to_render = animate_avatar_mouth(avatar, mouth_activity, mouth_y_offset, mouth_x_offset);
+            }
             const cv::Rect overlay_box = grow_rect(face_box, 1.35 * avatar_scale, output.size());
-            alpha_blend_into(output, avatar, overlay_box);
+            alpha_blend_into(output, avatar_to_render, overlay_box);
         } else if (!virtual_background) {
             output = apply_beauty(output, beauty_strength * 0.6);
         }
@@ -1210,6 +1348,7 @@ int main(int argc, char** argv) {
         std::lock_guard<std::mutex> lock(runtime_settings->mutex);
         runtime_settings->render_mode = options.render_mode;
         runtime_settings->background_mode = options.background_mode;
+        runtime_settings->mouth_animation = options.mouth_animation;
         runtime_settings->detect_every = options.detect_every;
         runtime_settings->beauty_strength = options.beauty_strength;
         runtime_settings->avatar_scale = options.avatar_scale;
@@ -1248,6 +1387,9 @@ int main(int argc, char** argv) {
     cv::Mat current_avatar = avatar;
     cv::Rect last_face;
     int last_face_hold = 0;
+    int detect_miss_streak = 0;
+    cv::Mat previous_mouth_patch;
+    double mouth_activity = 0.0;
     int frame_index = 0;
     auto next_gpio_poll = std::chrono::steady_clock::now();
 
@@ -1276,26 +1418,41 @@ int main(int argc, char** argv) {
 
         std::string render_mode;
         std::string background_mode;
+        std::string mouth_animation;
         int detect_every = options.detect_every;
         int fps = options.fps;
         double avatar_scale = options.avatar_scale;
         double beauty_strength = options.beauty_strength;
+        double mouth_y_offset = options.mouth_y_offset;
+        double mouth_x_offset = options.mouth_x_offset;
         {
             std::lock_guard<std::mutex> lock(runtime_settings->mutex);
             render_mode = runtime_settings->render_mode;
             background_mode = runtime_settings->background_mode;
+            mouth_animation = runtime_settings->mouth_animation;
             detect_every = runtime_settings->detect_every;
             avatar_scale = runtime_settings->avatar_scale;
             beauty_strength = runtime_settings->beauty_strength;
+            mouth_y_offset = runtime_settings->mouth_y_offset;
+            mouth_x_offset = runtime_settings->mouth_x_offset;
         }
 
         bool refreshed_face = false;
         if (frame_index % std::max(1, detect_every) == 0) {
-            const cv::Rect detected = detect_face_robust(frame, frontal_face_cascade, profile_face_cascade, last_face);
+            const bool allow_expensive_rotation = detect_miss_streak >= 2;
+            const cv::Rect detected = detect_face_robust(
+                frame,
+                frontal_face_cascade,
+                profile_face_cascade,
+                last_face,
+                allow_expensive_rotation);
             if (!detected.empty()) {
                 last_face = detected;
                 last_face_hold = std::max(4, detect_every * 4);
+                detect_miss_streak = 0;
                 refreshed_face = true;
+            } else {
+                ++detect_miss_streak;
             }
         }
         if (!refreshed_face) {
@@ -1307,13 +1464,19 @@ int main(int argc, char** argv) {
         }
         ++frame_index;
 
+        mouth_activity = estimate_mouth_activity(frame, last_face, previous_mouth_patch, mouth_activity);
+
         const cv::Mat output = build_output_frame(
             frame,
             current_avatar,
             render_mode,
             background_mode,
+            mouth_animation,
             last_face,
             avatar_scale,
+            mouth_y_offset,
+            mouth_x_offset,
+            mouth_activity,
             beauty_strength);
 
         if (options.output_mode == "usb") {
@@ -1408,12 +1571,88 @@ std::map<std::string, std::string> parse_query(const std::string& query) {
 void clamp_runtime_settings(RuntimeSettings& settings) {
     settings.render_mode = to_lower(settings.render_mode);
     settings.background_mode = to_lower(settings.background_mode);
+    settings.mouth_animation = to_lower(settings.mouth_animation);
+    if (settings.mouth_animation != "off") {
+        settings.mouth_animation = "normal";
+    }
     settings.detect_every = std::max(1, settings.detect_every);
     settings.beauty_strength = std::clamp(settings.beauty_strength, 0.0, 1.0);
     settings.avatar_scale = std::clamp(settings.avatar_scale, 0.6, 3.0);
     settings.mouth_y_offset = std::clamp(settings.mouth_y_offset, -1.0, 1.0);
     settings.mouth_x_offset = std::clamp(settings.mouth_x_offset, -1.0, 1.0);
     settings.network_jpeg_quality = std::clamp(settings.network_jpeg_quality, 40, 95);
+}
+
+std::string format_double(double value, int precision) {
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(precision) << value;
+    std::string text = oss.str();
+    while (!text.empty() && text.back() == '0') {
+        text.pop_back();
+    }
+    if (!text.empty() && text.back() == '.') {
+        text.pop_back();
+    }
+    if (text.empty()) {
+        text = "0";
+    }
+    return text;
+}
+
+bool persist_runtime_settings(const RuntimeSettings& settings, const std::string& env_file) {
+#ifdef _WIN32
+    (void)settings;
+    (void)env_file;
+    return false;
+#else
+    std::vector<std::string> lines;
+    {
+        std::ifstream in(env_file);
+        std::string line;
+        while (std::getline(in, line)) {
+            lines.push_back(line);
+        }
+    }
+
+    const std::vector<std::pair<std::string, std::string>> updates = {
+        {"RENDER_MODE", settings.render_mode},
+        {"BACKGROUND_MODE", settings.background_mode},
+        {"MOUTH_ANIMATION", settings.mouth_animation},
+        {"DETECT_EVERY", std::to_string(settings.detect_every)},
+        {"BEAUTY_STRENGTH", format_double(settings.beauty_strength, 3)},
+        {"AVATAR_SCALE", format_double(settings.avatar_scale, 3)},
+        {"MOUTH_Y_OFFSET", format_double(settings.mouth_y_offset, 3)},
+        {"MOUTH_X_OFFSET", format_double(settings.mouth_x_offset, 3)},
+        {"NETWORK_JPEG_QUALITY", std::to_string(settings.network_jpeg_quality)}
+    };
+
+    auto replace_or_append = [&](const std::string& key, const std::string& value) {
+        const std::string prefix = key + "=";
+        for (auto& line : lines) {
+            if (line.rfind(prefix, 0) == 0) {
+                line = prefix + value;
+                return;
+            }
+        }
+        lines.push_back(prefix + value);
+    };
+
+    for (const auto& kv : updates) {
+        replace_or_append(kv.first, kv.second);
+    }
+
+    std::ofstream out(env_file, std::ios::trunc);
+    if (!out.is_open()) {
+        return false;
+    }
+    for (size_t i = 0; i < lines.size(); ++i) {
+        out << lines[i];
+        if (i + 1 < lines.size()) {
+            out << '\n';
+        }
+    }
+    return static_cast<bool>(out);
+#endif
 }
 
 }  // namespace
