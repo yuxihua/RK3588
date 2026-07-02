@@ -1257,10 +1257,11 @@ cv::Mat animate_avatar_mouth(const cv::Mat& avatar,
     }
 
     cv::Mat stretched_cropped = stretched(cv::Rect(0, 0, dst.width, dst.height));
-    if (stretched_cropped.channels() == 4) {
+    if (stretched_cropped.channels() == 4 && animated.channels() == 4) {
         std::vector<cv::Mat> channels;
         cv::split(stretched_cropped, channels);
-        channels[3].copyTo(animated(dst), channels[3]);
+        const cv::Mat& alpha = channels[3];
+        stretched_cropped.copyTo(animated(dst), alpha);
     } else {
         stretched_cropped.copyTo(animated(dst));
     }
