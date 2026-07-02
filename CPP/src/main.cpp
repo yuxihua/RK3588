@@ -1407,7 +1407,7 @@ cv::Mat animate_avatar_mouth(const cv::Mat& avatar,
     const cv::Rect mouth_rect(mouth_x, mouth_y, mouth_w, mouth_h);
 
     cv::Mat src_roi = animated(mouth_rect).clone();
-    cv::Mat dst_roi = src_roi.clone();
+    cv::Mat warped = src_roi.clone();
 
     double style_multiplier = 1.0;
     if (mouth_style == "soft") {
@@ -1416,65 +1416,66 @@ cv::Mat animate_avatar_mouth(const cv::Mat& avatar,
         style_multiplier = 1.28;
     }
     const double gain = std::clamp(mouth_gain, 0.5, 3.0) * style_multiplier;
-    const double open_level = std::clamp((mouth_activity - 0.04) * 1.8 * gain, 0.0, 1.0);
+    const double open_level = std::clamp((mouth_activity - 0.05) * 1.5 * gain, 0.0, 1.0);
     if (open_level < 0.05) {
         return animated;
     }
 
-    const int split_y = std::clamp(static_cast<int>(mouth_rect.height * 0.50), 1, mouth_rect.height - 2);
-    const int open_px = std::max(1, static_cast<int>(mouth_rect.height * (0.06 + 0.26 * open_level)));
-    const int top_shift = std::max(1, static_cast<int>(open_px * 0.45));
-    const int bottom_shift = std::max(1, static_cast<int>(open_px * 0.55));
+    const double split_y = mouth_rect.height * 0.52;
+    const double center_x = mouth_rect.width * 0.50;
+    const double sigma_y = std::max(2.0, mouth_rect.height * 0.20);
+    const double sigma_x = std::max(2.0, mouth_rect.width * 0.22);
+    const double max_shift = mouth_rect.height * (0.05 + 0.10 * open_level);
 
-    for (int y = 0; y < split_y; ++y) {
-        const int dst_y = y - top_shift;
-        if (dst_y >= 0) {
-            src_roi.row(y).copyTo(dst_roi.row(dst_y));
-        }
-    }
-    for (int y = split_y; y < src_roi.rows; ++y) {
-        const int dst_y = y + bottom_shift;
-        if (dst_y < dst_roi.rows) {
-            src_roi.row(y).copyTo(dst_roi.row(dst_y));
+    cv::Mat map_x(src_roi.size(), CV_32FC1);
+    cv::Mat map_y(src_roi.size(), CV_32FC1);
+    for (int y = 0; y < src_roi.rows; ++y) {
+        const double dy = y - split_y;
+        const double dist_y = std::abs(dy);
+        const double weight_y = std::exp(-(dist_y * dist_y) / (2.0 * sigma_y * sigma_y));
+        const double dir = (dy < 0.0) ? -1.0 : 1.0;
+        for (int x = 0; x < src_roi.cols; ++x) {
+            const double dx = x - center_x;
+            const double weight_x = std::exp(-(dx * dx) / (2.0 * sigma_x * sigma_x));
+            const double y_shift = dir * max_shift * weight_y * weight_x;
+            map_x.at<float>(y, x) = static_cast<float>(x);
+            map_y.at<float>(y, x) = static_cast<float>(std::clamp(y - y_shift, 0.0, static_cast<double>(src_roi.rows - 1)));
         }
     }
 
-    const int gap_y0 = std::clamp(split_y - top_shift, 0, dst_roi.rows - 1);
-    const int gap_y1 = std::clamp(split_y + bottom_shift, 0, dst_roi.rows - 1);
-    const int upper_src_y = std::clamp(gap_y0 - 1, 0, src_roi.rows - 1);
-    const int lower_src_y = std::clamp(gap_y1 + 1, 0, src_roi.rows - 1);
-    const auto* upper_px = src_roi.ptr<cv::Vec4b>(upper_src_y);
-    const auto* lower_px = src_roi.ptr<cv::Vec4b>(lower_src_y);
-    for (int y = gap_y0; y <= gap_y1; ++y) {
-        const double t = (gap_y1 > gap_y0)
-            ? static_cast<double>(y - gap_y0) / (gap_y1 - gap_y0)
-            : 0.5;
-        auto* dst_px = dst_roi.ptr<cv::Vec4b>(y);
-        for (int x = 0; x < dst_roi.cols; ++x) {
-            dst_px[x][0] = static_cast<std::uint8_t>(upper_px[x][0] * (1.0 - t) + lower_px[x][0] * t);
-            dst_px[x][1] = static_cast<std::uint8_t>(upper_px[x][1] * (1.0 - t) + lower_px[x][1] * t);
-            dst_px[x][2] = static_cast<std::uint8_t>(upper_px[x][2] * (1.0 - t) + lower_px[x][2] * t);
-            dst_px[x][3] = static_cast<std::uint8_t>(upper_px[x][3] * (1.0 - t) + lower_px[x][3] * t);
-        }
-    }
+    cv::remap(src_roi, warped, map_x, map_y, cv::INTER_LINEAR, cv::BORDER_REFLECT_101);
 
     cv::Mat feather = cv::Mat::zeros(mouth_rect.height, mouth_rect.width, CV_8UC1);
     cv::ellipse(feather,
-                cv::Point(mouth_rect.width / 2, static_cast<int>(mouth_rect.height * 0.52)),
-                cv::Size(std::max(2, static_cast<int>(mouth_rect.width * 0.46)),
-                         std::max(2, static_cast<int>(mouth_rect.height * 0.54))),
+                cv::Point(mouth_rect.width / 2, static_cast<int>(mouth_rect.height * 0.55)),
+                cv::Size(std::max(2, static_cast<int>(mouth_rect.width * 0.36)),
+                         std::max(2, static_cast<int>(mouth_rect.height * 0.46))),
                 0.0,
                 0.0,
                 360.0,
                 cv::Scalar(255),
                 -1,
                 cv::LINE_AA);
-    cv::GaussianBlur(feather, feather, cv::Size(7, 7), 0.0);
+    cv::GaussianBlur(feather, feather, cv::Size(9, 9), 0.0);
 
+    cv::Mat blend_mask;
+    feather.convertTo(blend_mask, CV_32FC1, (0.30 + 0.45 * open_level) / 255.0);
     cv::Mat blended = src_roi.clone();
-    dst_roi.copyTo(blended, feather);
-    blended.copyTo(animated(mouth_rect));
+    for (int y = 0; y < blended.rows; ++y) {
+        auto* bpx = blended.ptr<cv::Vec4b>(y);
+        const auto* spx = src_roi.ptr<cv::Vec4b>(y);
+        const auto* wpx = warped.ptr<cv::Vec4b>(y);
+        const float* m = blend_mask.ptr<float>(y);
+        for (int x = 0; x < blended.cols; ++x) {
+            const float a = std::clamp(m[x], 0.0F, 1.0F);
+            bpx[x][0] = static_cast<std::uint8_t>(spx[x][0] * (1.0F - a) + wpx[x][0] * a);
+            bpx[x][1] = static_cast<std::uint8_t>(spx[x][1] * (1.0F - a) + wpx[x][1] * a);
+            bpx[x][2] = static_cast<std::uint8_t>(spx[x][2] * (1.0F - a) + wpx[x][2] * a);
+            bpx[x][3] = static_cast<std::uint8_t>(spx[x][3] * (1.0F - a) + wpx[x][3] * a);
+        }
+    }
 
+    blended.copyTo(animated(mouth_rect));
     return animated;
 }
 
