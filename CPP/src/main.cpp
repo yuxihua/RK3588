@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <cctype>
 #include <csignal>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -473,21 +474,127 @@ void alpha_blend_into(cv::Mat& background, const cv::Mat& foreground, const cv::
     result.convertTo(bg_roi, CV_8UC3, 255.0);
 }
 
-cv::Rect detect_face(const cv::Mat& frame, cv::CascadeClassifier& cascade) {
+void detect_with_cascade(const cv::Mat& gray,
+                         cv::CascadeClassifier& cascade,
+                         std::vector<cv::Rect>& out,
+                         double scale,
+                         int min_neighbors,
+                         const cv::Size& min_size) {
     if (cascade.empty()) {
-        return {};
+        return;
     }
-    cv::Mat gray;
-    cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
-    cv::equalizeHist(gray, gray);
     std::vector<cv::Rect> faces;
-    cascade.detectMultiScale(gray, faces, 1.1, 3, 0, cv::Size(48, 48));
+    cascade.detectMultiScale(gray, faces, scale, min_neighbors, 0, min_size);
+    out.insert(out.end(), faces.begin(), faces.end());
+}
+
+cv::Point2f apply_affine(const cv::Mat& affine, const cv::Point2f& p) {
+    return {
+        static_cast<float>(affine.at<double>(0, 0) * p.x + affine.at<double>(0, 1) * p.y + affine.at<double>(0, 2)),
+        static_cast<float>(affine.at<double>(1, 0) * p.x + affine.at<double>(1, 1) * p.y + affine.at<double>(1, 2))
+    };
+}
+
+cv::Rect map_rotated_rect_to_original(const cv::Rect& rect_in_rotated,
+                                      const cv::Mat& inverse_affine,
+                                      const cv::Size& bounds) {
+    const cv::Point2f p0(static_cast<float>(rect_in_rotated.x), static_cast<float>(rect_in_rotated.y));
+    const cv::Point2f p1(static_cast<float>(rect_in_rotated.x + rect_in_rotated.width), static_cast<float>(rect_in_rotated.y));
+    const cv::Point2f p2(static_cast<float>(rect_in_rotated.x), static_cast<float>(rect_in_rotated.y + rect_in_rotated.height));
+    const cv::Point2f p3(static_cast<float>(rect_in_rotated.x + rect_in_rotated.width), static_cast<float>(rect_in_rotated.y + rect_in_rotated.height));
+
+    const std::array<cv::Point2f, 4> corners = {
+        apply_affine(inverse_affine, p0),
+        apply_affine(inverse_affine, p1),
+        apply_affine(inverse_affine, p2),
+        apply_affine(inverse_affine, p3)
+    };
+    cv::Rect mapped = cv::boundingRect(corners);
+    mapped &= cv::Rect(0, 0, bounds.width, bounds.height);
+    return mapped;
+}
+
+cv::Rect choose_best_face(const std::vector<cv::Rect>& faces, const cv::Rect& previous_face) {
     if (faces.empty()) {
         return {};
     }
-    return *std::max_element(faces.begin(), faces.end(), [](const cv::Rect& a, const cv::Rect& b) {
-        return a.area() < b.area();
-    });
+
+    const cv::Point2f prev_center(
+        previous_face.x + previous_face.width * 0.5F,
+        previous_face.y + previous_face.height * 0.5F);
+    const bool has_previous = !previous_face.empty();
+
+    double best_score = -1.0;
+    cv::Rect best;
+    for (const auto& face : faces) {
+        if (face.width < 20 || face.height < 20) {
+            continue;
+        }
+        const double area_score = static_cast<double>(face.area());
+        double continuity_bonus = 0.0;
+        if (has_previous) {
+            const cv::Point2f center(face.x + face.width * 0.5F, face.y + face.height * 0.5F);
+            const double dx = static_cast<double>(center.x - prev_center.x);
+            const double dy = static_cast<double>(center.y - prev_center.y);
+            const double dist = std::sqrt(dx * dx + dy * dy);
+            continuity_bonus = std::max(0.0, 220.0 - dist) * 220.0;
+        }
+        const double score = area_score + continuity_bonus;
+        if (score > best_score) {
+            best_score = score;
+            best = face;
+        }
+    }
+    return best;
+}
+
+cv::Rect detect_face_robust(const cv::Mat& frame,
+                            cv::CascadeClassifier& frontal,
+                            cv::CascadeClassifier& profile,
+                            const cv::Rect& previous_face) {
+    if (frontal.empty() && profile.empty()) {
+        return {};
+    }
+
+    cv::Mat gray;
+    cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+    cv::equalizeHist(gray, gray);
+
+    std::vector<cv::Rect> candidates;
+    const cv::Size min_size(42, 42);
+    detect_with_cascade(gray, frontal, candidates, 1.1, 3, min_size);
+    detect_with_cascade(gray, profile, candidates, 1.1, 3, min_size);
+
+    // Mirror pass lets a single profile model detect both left and right profiles.
+    cv::Mat gray_flipped;
+    cv::flip(gray, gray_flipped, 1);
+    std::vector<cv::Rect> flipped_faces;
+    detect_with_cascade(gray_flipped, profile, flipped_faces, 1.1, 3, min_size);
+    for (const auto& f : flipped_faces) {
+        candidates.emplace_back(gray.cols - f.x - f.width, f.y, f.width, f.height);
+    }
+
+    // Small-angle rotation helps with head tilt and slight bowing.
+    const std::array<double, 4> angles = {-18.0, -10.0, 10.0, 18.0};
+    for (double angle : angles) {
+        const cv::Point2f center(gray.cols * 0.5F, gray.rows * 0.5F);
+        const cv::Mat affine = cv::getRotationMatrix2D(center, angle, 1.0);
+        cv::Mat rotated;
+        cv::warpAffine(gray, rotated, affine, gray.size(), cv::INTER_LINEAR, cv::BORDER_REPLICATE);
+        std::vector<cv::Rect> rotated_faces;
+        detect_with_cascade(rotated, frontal, rotated_faces, 1.1, 3, min_size);
+
+        cv::Mat inverse_affine;
+        cv::invertAffineTransform(affine, inverse_affine);
+        for (const auto& rf : rotated_faces) {
+            const cv::Rect mapped = map_rotated_rect_to_original(rf, inverse_affine, frame.size());
+            if (!mapped.empty()) {
+                candidates.push_back(mapped);
+            }
+        }
+    }
+
+    return choose_best_face(candidates, previous_face);
 }
 
 bool read_gpio_value(int pin, int& value) {
@@ -1081,10 +1188,15 @@ int main(int argc, char** argv) {
     gpio_selector.avatar_10 = options.avatar_gpio_10;
     gpio_selector.avatar_11 = options.avatar_gpio_11;
 
-    cv::CascadeClassifier face_cascade;
-    const std::string face_cascade_path = find_cascade_file("haarcascade_frontalface_default.xml");
-    if (!face_cascade.load(face_cascade_path)) {
-        std::cerr << "failed to load face cascade: " << face_cascade_path << '\n';
+    cv::CascadeClassifier frontal_face_cascade;
+    cv::CascadeClassifier profile_face_cascade;
+    const std::string frontal_cascade_path = find_cascade_file("haarcascade_frontalface_default.xml");
+    const std::string profile_cascade_path = find_cascade_file("haarcascade_profileface.xml");
+    if (!frontal_face_cascade.load(frontal_cascade_path)) {
+        std::cerr << "failed to load frontal face cascade: " << frontal_cascade_path << '\n';
+    }
+    if (!profile_face_cascade.load(profile_cascade_path)) {
+        std::cerr << "failed to load profile face cascade: " << profile_cascade_path << '\n';
     }
 
     cv::VideoCapture capture;
@@ -1135,6 +1247,7 @@ int main(int argc, char** argv) {
     std::string current_avatar_path = avatar_path;
     cv::Mat current_avatar = avatar;
     cv::Rect last_face;
+    int last_face_hold = 0;
     int frame_index = 0;
     auto next_gpio_poll = std::chrono::steady_clock::now();
 
@@ -1176,8 +1289,21 @@ int main(int argc, char** argv) {
             beauty_strength = runtime_settings->beauty_strength;
         }
 
+        bool refreshed_face = false;
         if (frame_index % std::max(1, detect_every) == 0) {
-            last_face = detect_face(frame, face_cascade);
+            const cv::Rect detected = detect_face_robust(frame, frontal_face_cascade, profile_face_cascade, last_face);
+            if (!detected.empty()) {
+                last_face = detected;
+                last_face_hold = std::max(4, detect_every * 4);
+                refreshed_face = true;
+            }
+        }
+        if (!refreshed_face) {
+            if (last_face_hold > 0) {
+                --last_face_hold;
+            } else {
+                last_face = {};
+            }
         }
         ++frame_index;
 
