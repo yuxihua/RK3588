@@ -80,8 +80,43 @@ resolve_camera_device() {
 	echo "$requested"
 }
 
+resolve_usb_output_device() {
+	local requested="$1"
+	if [[ -n "$requested" && -e "$requested" ]]; then
+		echo "$requested"
+		return 0
+	fi
+
+	local class_dir name_file node name
+	for class_dir in /sys/class/video4linux/video*; do
+		[[ -e "$class_dir" ]] || continue
+		name_file="$class_dir/name"
+		node="/dev/$(basename "$class_dir")"
+		[[ -e "$node" ]] || continue
+		if [[ -r "$name_file" ]]; then
+			name="$(tr '[:upper:]' '[:lower:]' < "$name_file" 2>/dev/null || true)"
+			if [[ "$name" == *"g_uvc"* || "$name" == *"dwc3-gadget"* || "$name" == *"uvc"* ]]; then
+				echo "$node"
+				return 0
+			fi
+		fi
+	done
+
+	local candidate
+	for candidate in /dev/video*; do
+		[[ -e "$candidate" ]] || continue
+		echo "$candidate"
+		return 0
+	done
+
+	echo "$requested"
+}
+
 AVATAR_FALLBACK_PATH="$(resolve_avatar_fallback)"
 CAMERA="$(resolve_camera_device "$CAMERA")"
+if [[ "$OUTPUT_MODE" == "usb" ]]; then
+	OUTPUT_DEVICE="$(resolve_usb_output_device "$OUTPUT_DEVICE")"
+fi
 
 ARGS=(
 	--camera "$CAMERA"

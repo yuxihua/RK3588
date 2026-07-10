@@ -102,7 +102,20 @@ write_cfg() {
 
   # Vendor kernels may expose some attributes as read-only; skip quietly.
   [[ -w "$path" ]] || return 0
-  echo "$value" > "$path"
+  echo "$value" > "$path" 2>/dev/null || true
+}
+
+write_cfg_lines() {
+  local path="$1"
+  shift
+
+  [[ -w "$path" ]] || return 0
+  {
+    local line
+    for line in "$@"; do
+      printf '%s\n' "$line"
+    done
+  } > "$path" 2>/dev/null || true
 }
 
 if [[ ! -d "$CONFIGFS" ]]; then
@@ -153,6 +166,7 @@ fi
 mkdir -p "functions/$UVC_FUNC/control/header/h"
 mkdir -p "functions/$UVC_FUNC/control/class"
 mkdir -p "functions/$UVC_FUNC/streaming/header"
+mkdir -p "functions/$UVC_FUNC/streaming/header/h"
 mkdir -p "functions/$UVC_FUNC/streaming/class"
 mkdir -p "functions/$UVC_FUNC/streaming/uncompressed/u/240p"
 mkdir -p "functions/$UVC_FUNC/streaming/mjpeg/m/240p"
@@ -171,12 +185,7 @@ write_cfg 1152000 "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwMinBitRat
 write_cfg 2304000 "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwMaxBitRate"
 write_cfg 153600 "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwMaxVideoFrameBufferSize"
 write_cfg 666666 "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwDefaultFrameInterval"
-if [[ -w "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwFrameInterval" ]]; then
-cat > "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwFrameInterval" <<'EOF'
-666666
-333333
-EOF
-fi
+write_cfg_lines "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwFrameInterval" 666666 333333
 
 # MJPEG 320x240 @ 15/30 fps
 write_cfg 2 "functions/$UVC_FUNC/streaming/mjpeg/m/bFormatIndex"
@@ -189,12 +198,7 @@ write_cfg 1152000 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwMinBitRate"
 write_cfg 4608000 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwMaxBitRate"
 write_cfg 153600 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwMaxVideoFrameBufferSize"
 write_cfg 666666 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwDefaultFrameInterval"
-if [[ -w "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwFrameInterval" ]]; then
-cat > "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwFrameInterval" <<'EOF'
-666666
-333333
-EOF
-fi
+write_cfg_lines "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwFrameInterval" 666666 333333
 
 # Link control/streaming headers into class directories.
 ln -s header/h "functions/$UVC_FUNC/control/class/fs/h" 2>/dev/null || true
