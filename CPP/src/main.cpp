@@ -1321,9 +1321,14 @@ bool open_camera(const std::string& device, const Options& options, cv::VideoCap
     std::sort(candidates.begin(), candidates.end());
     candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
 
+    const std::array<int, 3> backends = {cv::CAP_V4L2, cv::CAP_GSTREAMER, cv::CAP_ANY};
+
     for (const auto& candidate : candidates) {
-        capture.open(candidate, cv::CAP_V4L2);
-        if (capture.isOpened()) {
+        for (const int backend : backends) {
+            capture.open(candidate, backend);
+            if (!capture.isOpened()) {
+                continue;
+            }
             capture.set(cv::CAP_PROP_FRAME_WIDTH, options.width);
             capture.set(cv::CAP_PROP_FRAME_HEIGHT, options.height);
             capture.set(cv::CAP_PROP_FPS, options.fps);
@@ -1563,8 +1568,7 @@ int main(int argc, char** argv) {
 
     cv::VideoCapture capture;
     if (!open_camera(options.camera, options, capture)) {
-        std::cerr << "failed to open camera: " << options.camera << '\n';
-        return 1;
+        std::cerr << "initial camera unavailable: " << options.camera << ", will retry in background\n";
     }
 
     auto runtime_settings = std::make_shared<RuntimeSettings>();
