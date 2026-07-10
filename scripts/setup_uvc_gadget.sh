@@ -59,6 +59,19 @@ link_uvc_function() {
   rm -f "$GADGET_DIR/configs/c.1/$UVC_FUNC" 2>/dev/null || true
   rm -f "$GADGET_DIR/configs/c.1/f1" 2>/dev/null || true
 
+  # Some vendor kernels require target relative to configs/c.1.
+  (
+    cd "$GADGET_DIR/configs/c.1"
+    ln -s "../../functions/$UVC_FUNC" "$UVC_FUNC" 2>/dev/null || true
+  )
+  [[ -L "$GADGET_DIR/configs/c.1/$UVC_FUNC" ]] && return 0
+
+  (
+    cd "$GADGET_DIR/configs/c.1"
+    ln -s "../../functions/$UVC_FUNC" "f1" 2>/dev/null || true
+  )
+  [[ -L "$GADGET_DIR/configs/c.1/f1" ]] && return 0
+
   # Prefer the same link style verified by acm.usb0 on this board.
   (
     cd "$GADGET_DIR"
@@ -81,6 +94,15 @@ link_uvc_function() {
   [[ -L "$GADGET_DIR/configs/c.1/f1" ]] && return 0
 
   return 1
+}
+
+write_cfg() {
+  local value="$1"
+  local path="$2"
+
+  # Vendor kernels may expose some attributes as read-only; skip quietly.
+  [[ -w "$path" ]] || return 0
+  echo "$value" > "$path"
 }
 
 if [[ ! -d "$CONFIGFS" ]]; then
@@ -137,38 +159,42 @@ mkdir -p "functions/$UVC_FUNC/streaming/mjpeg/m/240p"
 mkdir -p "functions/$UVC_FUNC/streaming/color_matching/default"
 
 # Uncompressed YUYV 320x240 @ 15/30 fps
-echo 1 > "functions/$UVC_FUNC/streaming/uncompressed/u/bFormatIndex" || true
-echo 1 > "functions/$UVC_FUNC/streaming/uncompressed/u/bNumFrameDescriptors" || true
-echo YUY2 > "functions/$UVC_FUNC/streaming/uncompressed/u/guidFormat" || true
-echo 16 > "functions/$UVC_FUNC/streaming/uncompressed/u/bBitsPerPixel" || true
+write_cfg 1 "functions/$UVC_FUNC/streaming/uncompressed/u/bFormatIndex"
+write_cfg 1 "functions/$UVC_FUNC/streaming/uncompressed/u/bNumFrameDescriptors"
+write_cfg YUY2 "functions/$UVC_FUNC/streaming/uncompressed/u/guidFormat"
+write_cfg 16 "functions/$UVC_FUNC/streaming/uncompressed/u/bBitsPerPixel"
 
-echo 1 > "functions/$UVC_FUNC/streaming/uncompressed/u/240p/bFrameIndex" || true
-echo 320 > "functions/$UVC_FUNC/streaming/uncompressed/u/240p/wWidth" || true
-echo 240 > "functions/$UVC_FUNC/streaming/uncompressed/u/240p/wHeight" || true
-echo 1152000 > "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwMinBitRate" || true
-echo 2304000 > "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwMaxBitRate" || true
-echo 153600 > "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwMaxVideoFrameBufferSize" || true
-echo 666666 > "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwDefaultFrameInterval" || true
+write_cfg 1 "functions/$UVC_FUNC/streaming/uncompressed/u/240p/bFrameIndex"
+write_cfg 320 "functions/$UVC_FUNC/streaming/uncompressed/u/240p/wWidth"
+write_cfg 240 "functions/$UVC_FUNC/streaming/uncompressed/u/240p/wHeight"
+write_cfg 1152000 "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwMinBitRate"
+write_cfg 2304000 "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwMaxBitRate"
+write_cfg 153600 "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwMaxVideoFrameBufferSize"
+write_cfg 666666 "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwDefaultFrameInterval"
+if [[ -w "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwFrameInterval" ]]; then
 cat > "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwFrameInterval" <<'EOF'
 666666
 333333
 EOF
+fi
 
 # MJPEG 320x240 @ 15/30 fps
-echo 2 > "functions/$UVC_FUNC/streaming/mjpeg/m/bFormatIndex" || true
-echo 1 > "functions/$UVC_FUNC/streaming/mjpeg/m/bNumFrameDescriptors" || true
+write_cfg 2 "functions/$UVC_FUNC/streaming/mjpeg/m/bFormatIndex"
+write_cfg 1 "functions/$UVC_FUNC/streaming/mjpeg/m/bNumFrameDescriptors"
 
-echo 1 > "functions/$UVC_FUNC/streaming/mjpeg/m/240p/bFrameIndex" || true
-echo 320 > "functions/$UVC_FUNC/streaming/mjpeg/m/240p/wWidth" || true
-echo 240 > "functions/$UVC_FUNC/streaming/mjpeg/m/240p/wHeight" || true
-echo 1152000 > "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwMinBitRate" || true
-echo 4608000 > "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwMaxBitRate" || true
-echo 153600 > "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwMaxVideoFrameBufferSize" || true
-echo 666666 > "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwDefaultFrameInterval" || true
+write_cfg 1 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/bFrameIndex"
+write_cfg 320 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/wWidth"
+write_cfg 240 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/wHeight"
+write_cfg 1152000 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwMinBitRate"
+write_cfg 4608000 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwMaxBitRate"
+write_cfg 153600 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwMaxVideoFrameBufferSize"
+write_cfg 666666 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwDefaultFrameInterval"
+if [[ -w "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwFrameInterval" ]]; then
 cat > "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwFrameInterval" <<'EOF'
 666666
 333333
 EOF
+fi
 
 # Link control/streaming headers into class directories.
 ln -s header/h "functions/$UVC_FUNC/control/class/fs/h" 2>/dev/null || true

@@ -218,8 +218,8 @@ fi
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=RK3588 USB Avatar Gateway
-After=network.target local-fs.target usbdevice.service
-Wants=usbdevice.service
+After=network.target local-fs.target usbdevice.service uvc-gadget-setup.service
+Wants=usbdevice.service uvc-gadget-setup.service
 
 [Service]
 Type=simple
