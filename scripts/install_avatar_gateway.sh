@@ -36,8 +36,8 @@ install -d "$USBDEVICE_OVERRIDE_DIR"
 cat > "$USBDEVICE_OVERRIDE_FILE" <<'EOF'
 #!/bin/sh
 
-# Ensure vendor usbdevice starts both UVC and ADB by default.
-USB_FUNCS="uvc adb"
+# Ensure vendor usbdevice starts UVC by default.
+USB_FUNCS="uvc"
 UVC_INSTANCES="uvc.gs7"
 
 uvc_prepare()
