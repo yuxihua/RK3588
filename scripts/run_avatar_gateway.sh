@@ -83,8 +83,16 @@ resolve_camera_device() {
 resolve_usb_output_device() {
 	local requested="$1"
 	if [[ -n "$requested" && -e "$requested" ]]; then
-		echo "$requested"
-		return 0
+		if command -v v4l2-ctl >/dev/null 2>&1; then
+			if v4l2-ctl -d "$requested" --all 2>/dev/null | grep -qi "Video Output"; then
+				echo "$requested"
+				return 0
+			fi
+		else
+			# Without v4l2-ctl we cannot validate capabilities; keep requested device.
+			echo "$requested"
+			return 0
+		fi
 	fi
 
 	local class_dir name_file node name
