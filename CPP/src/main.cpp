@@ -1365,6 +1365,9 @@ bool open_writer(Options& options, cv::VideoWriter& writer) {
 
     std::vector<cv::Size> sizes;
     sizes.emplace_back(options.width, options.height);
+    if (options.width != 640 || options.height != 360) {
+        sizes.emplace_back(640, 360);
+    }
     if (options.width != 640 || options.height != 480) {
         sizes.emplace_back(640, 480);
     }
@@ -1651,9 +1654,20 @@ int main(int argc, char** argv) {
     cv::VideoWriter writer;
     std::unique_ptr<MjpegServer> server;
     if (options.output_mode == "usb") {
-        if (!open_writer(options, writer)) {
-            std::cerr << "failed to open output device: " << options.output << ", fallback to network mode\n";
-            options.output_mode = "network";
+        int retry_count = 0;
+        while (!g_stop_requested.load()) {
+            if (open_writer(options, writer)) {
+                break;
+            }
+            ++retry_count;
+            if (retry_count == 1 || retry_count % 5 == 0) {
+                std::cerr << "failed to open output device: " << options.output
+                          << ", keep retrying in usb mode" << '\n';
+            }
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+        if (!writer.isOpened()) {
+            return 1;
         }
     }
 
