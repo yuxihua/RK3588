@@ -93,9 +93,18 @@ resolve_usb_output_device() {
 		name_file="$class_dir/name"
 		node="/dev/$(basename "$class_dir")"
 		[[ -e "$node" ]] || continue
+		[[ "$node" != "$CAMERA" ]] || continue
+
+		# Prefer real output nodes when v4l2-ctl is available.
+		if command -v v4l2-ctl >/dev/null 2>&1; then
+			if ! v4l2-ctl -d "$node" --all 2>/dev/null | grep -qi "Video Output"; then
+				continue
+			fi
+		fi
+
 		if [[ -r "$name_file" ]]; then
 			name="$(tr '[:upper:]' '[:lower:]' < "$name_file" 2>/dev/null || true)"
-			if [[ "$name" == *"g_uvc"* || "$name" == *"dwc3-gadget"* || "$name" == *"uvc"* ]]; then
+			if [[ "$name" == *"g_uvc"* || "$name" == *"dwc3-gadget"* || "$name" == *"uvc gadget"* ]]; then
 				echo "$node"
 				return 0
 			fi
@@ -105,6 +114,12 @@ resolve_usb_output_device() {
 	local candidate
 	for candidate in /dev/video*; do
 		[[ -e "$candidate" ]] || continue
+		[[ "$candidate" != "$CAMERA" ]] || continue
+		if command -v v4l2-ctl >/dev/null 2>&1; then
+			if ! v4l2-ctl -d "$candidate" --all 2>/dev/null | grep -qi "Video Output"; then
+				continue
+			fi
+		fi
 		echo "$candidate"
 		return 0
 	done
