@@ -1338,12 +1338,49 @@ bool open_camera(const std::string& device, const Options& options, cv::VideoCap
     return false;
 }
 
-bool open_writer(const Options& options, cv::VideoWriter& writer) {
-    const int fourcc = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
-    if (options.output_mode == "usb") {
-        writer.open(options.output, cv::CAP_V4L2, fourcc, options.fps, cv::Size(options.width, options.height), true);
-        return writer.isOpened();
+bool open_writer(Options& options, cv::VideoWriter& writer) {
+    if (options.output_mode != "usb") {
+        return false;
     }
+
+    const std::array<int, 2> backends = {cv::CAP_V4L2, cv::CAP_ANY};
+    const std::array<int, 2> fourccs = {
+        cv::VideoWriter::fourcc('M', 'J', 'P', 'G'),
+        cv::VideoWriter::fourcc('Y', 'U', 'Y', 'V')
+    };
+
+    std::vector<cv::Size> sizes;
+    sizes.emplace_back(options.width, options.height);
+    if (options.width != 640 || options.height != 480) {
+        sizes.emplace_back(640, 480);
+    }
+    if (options.width != 320 || options.height != 240) {
+        sizes.emplace_back(320, 240);
+    }
+
+    const int requested_width = options.width;
+    const int requested_height = options.height;
+
+    for (const int backend : backends) {
+        for (const int fourcc : fourccs) {
+            for (const auto& size : sizes) {
+                writer.release();
+                writer.open(options.output, backend, fourcc, options.fps, size, true);
+                if (!writer.isOpened()) {
+                    continue;
+                }
+
+                options.width = size.width;
+                options.height = size.height;
+                if (options.width != requested_width || options.height != requested_height) {
+                    std::cerr << "usb output fallback size: " << requested_width << 'x' << requested_height
+                              << " -> " << options.width << 'x' << options.height << '\n';
+                }
+                return true;
+            }
+        }
+    }
+
     return false;
 }
 
@@ -1536,7 +1573,7 @@ int main(int argc, char** argv) {
     std::signal(SIGINT, handle_signal);
     std::signal(SIGTERM, handle_signal);
 
-    const Options options = parse_args(argc, argv);
+    Options options = parse_args(argc, argv);
 
     cv::Mat avatar;
     const std::string avatar_path = resolve_avatar_path(options);
