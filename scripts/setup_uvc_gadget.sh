@@ -102,7 +102,7 @@ write_cfg() {
 
   # Vendor kernels may expose some attributes as read-only; skip quietly.
   [[ -w "$path" ]] || return 0
-  echo "$value" > "$path" 2>/dev/null || true
+  printf '%s\n' "$value" | tee "$path" >/dev/null 2>&1 || true
 }
 
 write_cfg_lines() {
@@ -115,7 +115,34 @@ write_cfg_lines() {
     for line in "$@"; do
       printf '%s\n' "$line"
     done
-  } > "$path" 2>/dev/null || true
+  } | tee "$path" >/dev/null 2>&1 || true
+}
+
+fallback_vendor_usbdevice() {
+  local service_name="usbdevice.service"
+  local udc_file
+
+  # If board vendor manages gadget via usbdevice, delegate to it.
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return 1
+  fi
+  if ! systemctl list-unit-files | grep -q '^usbdevice\.service'; then
+    return 1
+  fi
+
+  systemctl enable "$service_name" >/dev/null 2>&1 || true
+  systemctl restart "$service_name" >/dev/null 2>&1 || return 1
+
+  # Success when any gadget is bound to a UDC.
+  for udc_file in "$CONFIGFS"/usb_gadget/*/UDC; do
+    [[ -e "$udc_file" ]] || continue
+    if [[ -s "$udc_file" ]]; then
+      echo "已切换到 vendor usbdevice UVC 流程: ${udc_file%/UDC}" >&2
+      return 0
+    fi
+  done
+
+  return 1
 }
 
 if [[ ! -d "$CONFIGFS" ]]; then
@@ -212,6 +239,9 @@ if ! link_uvc_function; then
   echo "无法把 functions/$UVC_FUNC 链接到 configs/c.1，UVC 配置不完整。" >&2
   ls -la "functions" >&2 || true
   ls -la "configs/c.1" >&2 || true
+  if fallback_vendor_usbdevice; then
+    exit 0
+  fi
   exit 1
 fi
 
