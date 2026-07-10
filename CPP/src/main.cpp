@@ -1343,11 +1343,25 @@ bool open_writer(Options& options, cv::VideoWriter& writer) {
         return false;
     }
 
-    const std::array<int, 2> backends = {cv::CAP_V4L2, cv::CAP_ANY};
-    const std::array<int, 2> fourccs = {
+    const std::array<int, 1> backends = {cv::CAP_V4L2};
+    const std::array<int, 5> fourccs = {
         cv::VideoWriter::fourcc('M', 'J', 'P', 'G'),
-        cv::VideoWriter::fourcc('Y', 'U', 'Y', 'V')
+        cv::VideoWriter::fourcc('Y', 'U', 'Y', 'V'),
+        cv::VideoWriter::fourcc('U', 'Y', 'V', 'Y'),
+        cv::VideoWriter::fourcc('N', 'V', '1', '2'),
+        0
     };
+
+    std::vector<int> fps_candidates = {options.fps};
+    if (options.fps != 30) {
+        fps_candidates.push_back(30);
+    }
+    if (options.fps != 15) {
+        fps_candidates.push_back(15);
+    }
+    if (options.fps != 10) {
+        fps_candidates.push_back(10);
+    }
 
     std::vector<cv::Size> sizes;
     sizes.emplace_back(options.width, options.height);
@@ -1361,24 +1375,31 @@ bool open_writer(Options& options, cv::VideoWriter& writer) {
     const int requested_width = options.width;
     const int requested_height = options.height;
 
-    for (const int backend : backends) {
-        for (const int fourcc : fourccs) {
-            for (const auto& size : sizes) {
-                writer.release();
-                writer.open(options.output, backend, fourcc, options.fps, size, true);
-                if (!writer.isOpened()) {
-                    continue;
-                }
+    // Some vendor kernels need the gadget node to settle after bind.
+    for (int attempt = 0; attempt < 6; ++attempt) {
+        for (const int backend : backends) {
+            for (const int fourcc : fourccs) {
+                for (const int fps : fps_candidates) {
+                    for (const auto& size : sizes) {
+                        writer.release();
+                        writer.open(options.output, backend, fourcc, fps, size, true);
+                        if (!writer.isOpened()) {
+                            continue;
+                        }
 
-                options.width = size.width;
-                options.height = size.height;
-                if (options.width != requested_width || options.height != requested_height) {
-                    std::cerr << "usb output fallback size: " << requested_width << 'x' << requested_height
-                              << " -> " << options.width << 'x' << options.height << '\n';
+                        options.width = size.width;
+                        options.height = size.height;
+                        options.fps = fps;
+                        if (options.width != requested_width || options.height != requested_height) {
+                            std::cerr << "usb output fallback size: " << requested_width << 'x' << requested_height
+                                      << " -> " << options.width << 'x' << options.height << '\n';
+                        }
+                        return true;
+                    }
                 }
-                return true;
             }
         }
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
 
     return false;
@@ -1631,10 +1652,12 @@ int main(int argc, char** argv) {
     std::unique_ptr<MjpegServer> server;
     if (options.output_mode == "usb") {
         if (!open_writer(options, writer)) {
-            std::cerr << "failed to open output device: " << options.output << '\n';
-            return 1;
+            std::cerr << "failed to open output device: " << options.output << ", fallback to network mode\n";
+            options.output_mode = "network";
         }
-    } else {
+    }
+
+    if (options.output_mode != "usb") {
         server = std::make_unique<MjpegServer>(options.network_host, options.network_port, options.network_path, options.network_jpeg_quality, runtime_settings);
         if (!server->start()) {
             std::cerr << "failed to start MJPEG server on " << options.network_host << ':' << options.network_port << '\n';
