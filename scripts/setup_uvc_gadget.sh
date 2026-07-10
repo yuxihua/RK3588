@@ -12,6 +12,38 @@ GADGET_DIR="$CONFIGFS/usb_gadget/rk3588_uvc"
 UDC_NAME=""
 UVC_FUNC="uvc.0"
 
+has_usbdevice_service() {
+  local load_state
+  load_state="$(systemctl show -p LoadState --value usbdevice.service 2>/dev/null || true)"
+  [[ "$load_state" == "loaded" ]]
+}
+
+try_vendor_usbdevice_and_exit() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return 1
+  fi
+  if ! has_usbdevice_service; then
+    return 1
+  fi
+
+  # Vendor boards may already manage gadget lifecycle via usbdevice.
+  systemctl enable usbdevice.service >/dev/null 2>&1 || true
+  systemctl restart usbdevice.service >/dev/null 2>&1 || true
+
+  local udc_file
+  for udc_file in "$CONFIGFS"/usb_gadget/*/UDC; do
+    [[ -e "$udc_file" ]] || continue
+    if [[ -s "$udc_file" ]]; then
+      echo "使用 vendor usbdevice 流程: ${udc_file%/UDC}"
+      exit 0
+    fi
+  done
+
+  # Even if host is not attached yet, keep vendor flow and avoid conflicting writes.
+  echo "使用 vendor usbdevice 流程，等待主机枚举连接。"
+  exit 0
+}
+
 set_usb_device_role() {
   local role_path
 
@@ -126,7 +158,7 @@ fallback_vendor_usbdevice() {
   if ! command -v systemctl >/dev/null 2>&1; then
     return 1
   fi
-  if ! systemctl list-unit-files | grep -q '^usbdevice\.service'; then
+  if ! has_usbdevice_service; then
     return 1
   fi
 
@@ -149,6 +181,8 @@ if [[ ! -d "$CONFIGFS" ]]; then
   echo "configfs 未挂载，先执行: mount -t configfs none /sys/kernel/config" >&2
   exit 1
 fi
+
+try_vendor_usbdevice_and_exit
 
 if [[ -d "$GADGET_DIR" ]]; then
   if [[ -e "$GADGET_DIR/UDC" ]]; then
