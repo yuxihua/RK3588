@@ -38,6 +38,17 @@ WIDTH="${WIDTH:-960}"
 HEIGHT="${HEIGHT:-540}"
 FPS="${FPS:-15}"
 
+normalize_video_device() {
+	local raw="$1"
+	local first
+	first="$(printf '%s' "$raw" | grep -oE '/dev/video[0-9]+' | head -n 1 || true)"
+	if [[ -n "$first" ]]; then
+		echo "$first"
+	else
+		echo "$raw"
+	fi
+}
+
 resolve_avatar_fallback() {
 	local candidates=(
 		"$ROOT_DIR/assets/avatars/avatar_male.png"
@@ -137,6 +148,7 @@ resolve_usb_output_device() {
 
 AVATAR_FALLBACK_PATH="$(resolve_avatar_fallback)"
 CAMERA="$(resolve_camera_device "$CAMERA")"
+OUTPUT_DEVICE="$(normalize_video_device "$OUTPUT_DEVICE")"
 if [[ "$OUTPUT_MODE" == "usb" ]]; then
 	OUTPUT_DEVICE="$(resolve_usb_output_device "$OUTPUT_DEVICE")"
 fi

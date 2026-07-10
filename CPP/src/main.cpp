@@ -1666,6 +1666,9 @@ int main(int argc, char** argv) {
             }
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
+        if (g_stop_requested.load() && !writer.isOpened()) {
+            return 0;
+        }
         if (!writer.isOpened()) {
             return 1;
         }
