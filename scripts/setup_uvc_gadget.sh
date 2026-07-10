@@ -39,6 +39,21 @@ try_vendor_usbdevice_and_exit() {
     fi
   done
 
+  # Some vendor service variants leave gadget unbound; force-bind once.
+  local udc_name gadget_path
+  udc_name="$(ls /sys/class/udc 2>/dev/null | head -n 1 || true)"
+  if [[ -n "$udc_name" ]]; then
+    for gadget_path in "$CONFIGFS"/usb_gadget/rockchip "$CONFIGFS"/usb_gadget/rk3588_uvc; do
+      [[ -d "$gadget_path" ]] || continue
+      [[ -w "$gadget_path/UDC" ]] || continue
+      echo "$udc_name" > "$gadget_path/UDC" 2>/dev/null || true
+      if [[ -s "$gadget_path/UDC" ]]; then
+        echo "vendor 流程已强制绑定 UDC: $gadget_path -> $udc_name"
+        exit 0
+      fi
+    done
+  fi
+
   # Even if host is not attached yet, keep vendor flow and avoid conflicting writes.
   echo "使用 vendor usbdevice 流程，等待主机枚举连接。"
   exit 0
