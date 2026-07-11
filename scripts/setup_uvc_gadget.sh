@@ -40,9 +40,19 @@ try_vendor_usbdevice_and_exit() {
   done
 
   # Some vendor service variants leave gadget unbound; force-bind once.
-  local udc_name gadget_path
+  local udc_name gadget_path owner_link owner_path owner_name owner_udc
   udc_name="$(ls /sys/class/udc 2>/dev/null | head -n 1 || true)"
   if [[ -n "$udc_name" ]]; then
+    owner_link="/sys/class/udc/$udc_name/device/gadget"
+    owner_path="$(readlink -f "$owner_link" 2>/dev/null || true)"
+    owner_name="$(basename "$owner_path" 2>/dev/null || true)"
+    if [[ -n "$owner_name" && "$owner_name" != "gadget" ]]; then
+      owner_udc="$CONFIGFS/usb_gadget/$owner_name/UDC"
+      if [[ -w "$owner_udc" ]]; then
+        echo "" > "$owner_udc" 2>/dev/null || true
+      fi
+    fi
+
     for gadget_path in "$CONFIGFS"/usb_gadget/rockchip "$CONFIGFS"/usb_gadget/rk3588_uvc; do
       [[ -d "$gadget_path" ]] || continue
       [[ -w "$gadget_path/UDC" ]] || continue
