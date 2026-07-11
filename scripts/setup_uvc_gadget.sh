@@ -19,22 +19,18 @@ has_usbdevice_service() {
 }
 
 try_vendor_usbdevice_and_exit() {
-  if ! command -v systemctl >/dev/null 2>&1; then
-    return 1
-  fi
-  if ! has_usbdevice_service; then
+  if ! command -v /usr/bin/usbdevice >/dev/null 2>&1; then
     return 1
   fi
 
-  # Vendor boards may already manage gadget lifecycle via usbdevice.
-  systemctl enable usbdevice.service >/dev/null 2>&1 || true
-  systemctl restart usbdevice.service >/dev/null 2>&1 || true
+  # Prefer direct invocation to avoid systemd forking/stop cycles on some vendor images.
+  /usr/bin/usbdevice start >/dev/null 2>&1 || true
 
   local udc_file
   for udc_file in "$CONFIGFS"/usb_gadget/*/UDC; do
     [[ -e "$udc_file" ]] || continue
     if [[ -s "$udc_file" ]]; then
-      echo "使用 vendor usbdevice 流程: ${udc_file%/UDC}"
+      echo "使用 vendor usbdevice 命令流程: ${udc_file%/UDC}"
       exit 0
     fi
   done
@@ -65,7 +61,7 @@ try_vendor_usbdevice_and_exit() {
   fi
 
   # Even if host is not attached yet, keep vendor flow and avoid conflicting writes.
-  echo "使用 vendor usbdevice 流程，等待主机枚举连接。"
+  echo "使用 vendor usbdevice 命令流程，等待主机枚举连接。"
   exit 0
 }
 
