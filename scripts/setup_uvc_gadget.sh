@@ -16,6 +16,49 @@ CFG_NAME="${USB_GADGET_CFG_NAME:-b.1}"
 CFG_DIR="configs/$CFG_NAME"
 USB_GADGET_FORCE_CONFIGFS="${USB_GADGET_FORCE_CONFIGFS:-0}"
 
+ensure_cfg_dir() {
+  local requested="${1:-$CFG_NAME}"
+  local candidate alt existing
+
+  candidate="$requested"
+  alt="c.1"
+  [[ "$candidate" == "c.1" ]] && alt="b.1"
+
+  if [[ -d "$GADGET_DIR/configs/$candidate" ]]; then
+    CFG_NAME="$candidate"
+    CFG_DIR="configs/$CFG_NAME"
+    return 0
+  fi
+
+  if mkdir -p "$GADGET_DIR/configs/$candidate/strings/0x409" 2>/dev/null; then
+    CFG_NAME="$candidate"
+    CFG_DIR="configs/$CFG_NAME"
+    return 0
+  fi
+
+  if [[ -d "$GADGET_DIR/configs/$alt" ]]; then
+    CFG_NAME="$alt"
+    CFG_DIR="configs/$CFG_NAME"
+    return 0
+  fi
+
+  if mkdir -p "$GADGET_DIR/configs/$alt/strings/0x409" 2>/dev/null; then
+    CFG_NAME="$alt"
+    CFG_DIR="configs/$CFG_NAME"
+    return 0
+  fi
+
+  for existing in "$GADGET_DIR"/configs/*; do
+    [[ -d "$existing" ]] || continue
+    CFG_NAME="$(basename "$existing")"
+    CFG_DIR="configs/$CFG_NAME"
+    mkdir -p "$GADGET_DIR/$CFG_DIR/strings/0x409" 2>/dev/null || true
+    return 0
+  done
+
+  return 1
+}
+
 has_usbdevice_service() {
   local load_state
   load_state="$(systemctl show -p LoadState --value usbdevice.service 2>/dev/null || true)"
@@ -269,10 +312,15 @@ $MODPROBE usb_f_uvc 2>/dev/null || true
 mkdir -p "$GADGET_DIR"
 cd "$GADGET_DIR"
 
+if ! ensure_cfg_dir "$CFG_NAME"; then
+  echo "无法创建可用的 gadget config 目录（尝试过 b.1/c.1）。" >&2
+  exit 1
+fi
+
 echo 0x1d6b > idVendor
 echo 0x0104 > idProduct
 mkdir -p strings/0x409
-mkdir -p "$CFG_DIR/strings/0x409"
+mkdir -p "$CFG_DIR/strings/0x409" 2>/dev/null || true
 
 echo "RK3588" > strings/0x409/manufacturer
 echo "USB Virtual Camera Gateway" > strings/0x409/product
