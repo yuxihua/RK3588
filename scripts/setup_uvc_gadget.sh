@@ -10,7 +10,10 @@ MODPROBE="${MODPROBE:-modprobe}"
 CONFIGFS=/sys/kernel/config
 GADGET_DIR="$CONFIGFS/usb_gadget/rk3588_uvc"
 UDC_NAME=""
-UVC_FUNC="uvc.0"
+# Keep Rockchip-friendly defaults while still allowing override via environment.
+UVC_FUNC="${USB_GADGET_UVC_FUNC:-uvc.gs7}"
+CFG_NAME="${USB_GADGET_CFG_NAME:-b.1}"
+CFG_DIR="configs/$CFG_NAME"
 USB_GADGET_FORCE_CONFIGFS="${USB_GADGET_FORCE_CONFIGFS:-0}"
 
 has_usbdevice_service() {
@@ -113,58 +116,60 @@ link_into_node() {
 }
 
 link_uvc_function() {
-  # configfs is picky about how function links are created; try common forms.
-  rm -f "$GADGET_DIR/configs/c.1/$UVC_FUNC" 2>/dev/null || true
-  rm -f "$GADGET_DIR/configs/c.1/f1" 2>/dev/null || true
-  rm -f "$GADGET_DIR/configs/c.1/f-uvc.0" 2>/dev/null || true
+  local link_name="f-uvc.${UVC_FUNC#uvc.}"
 
-  # Some vendor kernels require target relative to configs/c.1.
+  # configfs is picky about how function links are created; try common forms.
+  rm -f "$GADGET_DIR/$CFG_DIR/$UVC_FUNC" 2>/dev/null || true
+  rm -f "$GADGET_DIR/$CFG_DIR/f1" 2>/dev/null || true
+  rm -f "$GADGET_DIR/$CFG_DIR/$link_name" 2>/dev/null || true
+
+  # Some vendor kernels require target relative to config dir.
   (
-    cd "$GADGET_DIR/configs/c.1"
+    cd "$GADGET_DIR/$CFG_DIR"
     ln -s "../../functions/$UVC_FUNC" "$UVC_FUNC" 2>/dev/null || true
   )
-  [[ -L "$GADGET_DIR/configs/c.1/$UVC_FUNC" ]] && return 0
+  [[ -L "$GADGET_DIR/$CFG_DIR/$UVC_FUNC" ]] && return 0
 
   (
-    cd "$GADGET_DIR/configs/c.1"
+    cd "$GADGET_DIR/$CFG_DIR"
     ln -s "../../functions/$UVC_FUNC" "f1" 2>/dev/null || true
   )
-  [[ -L "$GADGET_DIR/configs/c.1/f1" ]] && return 0
+  [[ -L "$GADGET_DIR/$CFG_DIR/f1" ]] && return 0
 
   # Prefer the same link style verified by acm.usb0 on this board.
   (
     cd "$GADGET_DIR"
-    ln -s "functions/$UVC_FUNC" "configs/c.1/$UVC_FUNC" 2>/dev/null || true
+    ln -s "functions/$UVC_FUNC" "$CFG_DIR/$UVC_FUNC" 2>/dev/null || true
   )
-  [[ -L "$GADGET_DIR/configs/c.1/$UVC_FUNC" ]] && return 0
+  [[ -L "$GADGET_DIR/$CFG_DIR/$UVC_FUNC" ]] && return 0
 
   # Some vendor kernels only accept explicit link names like f1.
   (
     cd "$GADGET_DIR"
-    ln -s "functions/$UVC_FUNC" "configs/c.1/f1" 2>/dev/null || true
+    ln -s "functions/$UVC_FUNC" "$CFG_DIR/f1" 2>/dev/null || true
   )
-  [[ -L "$GADGET_DIR/configs/c.1/f1" ]] && return 0
+  [[ -L "$GADGET_DIR/$CFG_DIR/f1" ]] && return 0
 
   # Rockchip vendor kernels often use f-uvc.* naming.
   (
     cd "$GADGET_DIR"
-    ln -s "functions/$UVC_FUNC" "configs/c.1/f-uvc.0" 2>/dev/null || true
+    ln -s "functions/$UVC_FUNC" "$CFG_DIR/$link_name" 2>/dev/null || true
   )
-  [[ -L "$GADGET_DIR/configs/c.1/f-uvc.0" ]] && return 0
+  [[ -L "$GADGET_DIR/$CFG_DIR/$link_name" ]] && return 0
 
   # Last relative style seen on vendor trees.
   (
-    cd "$GADGET_DIR/configs/c.1"
-    ln -s "../../../../usb_gadget/$(basename "$GADGET_DIR")/functions/$UVC_FUNC" "f-uvc.0" 2>/dev/null || true
+    cd "$GADGET_DIR/$CFG_DIR"
+    ln -s "../../../../usb_gadget/$(basename "$GADGET_DIR")/functions/$UVC_FUNC" "$link_name" 2>/dev/null || true
   )
-  [[ -L "$GADGET_DIR/configs/c.1/f-uvc.0" ]] && return 0
+  [[ -L "$GADGET_DIR/$CFG_DIR/$link_name" ]] && return 0
 
   # Last fallback with absolute target.
   (
     cd "$GADGET_DIR"
-    ln -s "$(pwd)/functions/$UVC_FUNC" "configs/c.1/f1" 2>/dev/null || true
+    ln -s "$(pwd)/functions/$UVC_FUNC" "$CFG_DIR/f1" 2>/dev/null || true
   )
-  [[ -L "$GADGET_DIR/configs/c.1/f1" ]] && return 0
+  [[ -L "$GADGET_DIR/$CFG_DIR/f1" ]] && return 0
 
   return 1
 }
@@ -175,7 +180,7 @@ write_cfg() {
 
   # Vendor kernels may expose some attributes as read-only; skip quietly.
   [[ -w "$path" ]] || return 0
-  printf '%s\n' "$value" | tee "$path" >/dev/null 2>&1 || true
+  printf '%s\n' "$value" > "$path" 2>/dev/null || true
 }
 
 write_cfg_lines() {
@@ -188,7 +193,7 @@ write_cfg_lines() {
     for line in "$@"; do
       printf '%s\n' "$line"
     done
-  } | tee "$path" >/dev/null 2>&1 || true
+  } > "$path" 2>/dev/null || true
 }
 
 fallback_vendor_usbdevice() {
@@ -241,7 +246,12 @@ if [[ -d "$GADGET_DIR" ]]; then
 
   # configfs 下很多节点是内核导出的目录或属性，不能直接 rm。
   # 这里只清理我们可能创建过的符号链接，避免报错刷屏。
+  rm -f "$GADGET_DIR/$CFG_DIR/$UVC_FUNC" || true
+  rm -f "$GADGET_DIR/$CFG_DIR/f1" || true
+  rm -f "$GADGET_DIR/$CFG_DIR/f-uvc.${UVC_FUNC#uvc.}" || true
   rm -f "$GADGET_DIR/configs/c.1/uvc.0" || true
+  rm -f "$GADGET_DIR/configs/c.1/f1" || true
+  rm -f "$GADGET_DIR/configs/c.1/f-uvc.0" || true
   rm -f "$GADGET_DIR/functions/$UVC_FUNC/control/class/fs/h" || true
   rm -f "$GADGET_DIR/functions/$UVC_FUNC/control/class/ss/h" || true
   rm -f "$GADGET_DIR/functions/$UVC_FUNC/streaming/header/h/u" || true
@@ -262,13 +272,13 @@ cd "$GADGET_DIR"
 echo 0x1d6b > idVendor
 echo 0x0104 > idProduct
 mkdir -p strings/0x409
-mkdir -p configs/c.1/strings/0x409
+mkdir -p "$CFG_DIR/strings/0x409"
 
 echo "RK3588" > strings/0x409/manufacturer
 echo "USB Virtual Camera Gateway" > strings/0x409/product
 echo "0001" > strings/0x409/serialnumber
-echo "UVC gadget configuration" > configs/c.1/strings/0x409/configuration
-echo 120 > configs/c.1/MaxPower
+echo "UVC gadget configuration" > "$CFG_DIR/strings/0x409/configuration"
+echo 120 > "$CFG_DIR/MaxPower"
 
 if [[ ! -d "functions/$UVC_FUNC" ]]; then
   mkdir "functions/$UVC_FUNC"
@@ -320,9 +330,9 @@ ln -s ../../header/h "functions/$UVC_FUNC/streaming/class/fs/h" 2>/dev/null || t
 ln -s ../../header/h "functions/$UVC_FUNC/streaming/class/hs/h" 2>/dev/null || true
 ln -s ../../header/h "functions/$UVC_FUNC/streaming/class/ss/h" 2>/dev/null || true
 if ! link_uvc_function; then
-  echo "无法把 functions/$UVC_FUNC 链接到 configs/c.1，UVC 配置不完整。" >&2
+  echo "无法把 functions/$UVC_FUNC 链接到 $CFG_DIR，UVC 配置不完整。" >&2
   ls -la "functions" >&2 || true
-  ls -la "configs/c.1" >&2 || true
+  ls -la "$CFG_DIR" >&2 || true
   if fallback_vendor_usbdevice; then
     exit 0
   fi
