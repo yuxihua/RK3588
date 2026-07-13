@@ -138,6 +138,14 @@ unbind_all_gadgets() {
   done
 }
 
+cleanup_node() {
+  local node="$1"
+  [[ -e "$node" || -L "$node" ]] || return 0
+  rm -f "$node" 2>/dev/null || true
+  rmdir "$node" 2>/dev/null || true
+  rm -rf "$node" 2>/dev/null || true
+}
+
 link_into_node() {
   local target="$1"
   local node="$2"
@@ -162,9 +170,9 @@ link_uvc_function() {
   local link_name="f-uvc.${UVC_FUNC#uvc.}"
 
   # configfs is picky about how function links are created; try common forms.
-  rm -f "$GADGET_DIR/$CFG_DIR/$UVC_FUNC" 2>/dev/null || true
-  rm -f "$GADGET_DIR/$CFG_DIR/f1" 2>/dev/null || true
-  rm -f "$GADGET_DIR/$CFG_DIR/$link_name" 2>/dev/null || true
+  cleanup_node "$GADGET_DIR/$CFG_DIR/$UVC_FUNC"
+  cleanup_node "$GADGET_DIR/$CFG_DIR/f1"
+  cleanup_node "$GADGET_DIR/$CFG_DIR/$link_name"
 
   # Some vendor kernels require target relative to config dir.
   (
@@ -222,15 +230,15 @@ write_cfg() {
   local path="$2"
 
   # Vendor kernels may expose some attributes as read-only; skip quietly.
-  [[ -w "$path" ]] || return 0
-  printf '%s\n' "$value" > "$path" 2>/dev/null || true
+  [[ -e "$path" ]] || return 0
+  { printf '%s\n' "$value" > "$path"; } 2>/dev/null || true
 }
 
 write_cfg_lines() {
   local path="$1"
   shift
 
-  [[ -w "$path" ]] || return 0
+  [[ -e "$path" ]] || return 0
   {
     local line
     for line in "$@"; do
@@ -289,19 +297,19 @@ if [[ -d "$GADGET_DIR" ]]; then
 
   # configfs 下很多节点是内核导出的目录或属性，不能直接 rm。
   # 这里只清理我们可能创建过的符号链接，避免报错刷屏。
-  rm -f "$GADGET_DIR/$CFG_DIR/$UVC_FUNC" || true
-  rm -f "$GADGET_DIR/$CFG_DIR/f1" || true
-  rm -f "$GADGET_DIR/$CFG_DIR/f-uvc.${UVC_FUNC#uvc.}" || true
-  rm -f "$GADGET_DIR/configs/c.1/uvc.0" || true
-  rm -f "$GADGET_DIR/configs/c.1/f1" || true
-  rm -f "$GADGET_DIR/configs/c.1/f-uvc.0" || true
-  rm -f "$GADGET_DIR/functions/$UVC_FUNC/control/class/fs/h" || true
-  rm -f "$GADGET_DIR/functions/$UVC_FUNC/control/class/ss/h" || true
-  rm -f "$GADGET_DIR/functions/$UVC_FUNC/streaming/header/h/u" || true
-  rm -f "$GADGET_DIR/functions/$UVC_FUNC/streaming/header/h/m" || true
-  rm -f "$GADGET_DIR/functions/$UVC_FUNC/streaming/class/fs/h" || true
-  rm -f "$GADGET_DIR/functions/$UVC_FUNC/streaming/class/hs/h" || true
-  rm -f "$GADGET_DIR/functions/$UVC_FUNC/streaming/class/ss/h" || true
+  cleanup_node "$GADGET_DIR/$CFG_DIR/$UVC_FUNC"
+  cleanup_node "$GADGET_DIR/$CFG_DIR/f1"
+  cleanup_node "$GADGET_DIR/$CFG_DIR/f-uvc.${UVC_FUNC#uvc.}"
+  cleanup_node "$GADGET_DIR/configs/c.1/uvc.0"
+  cleanup_node "$GADGET_DIR/configs/c.1/f1"
+  cleanup_node "$GADGET_DIR/configs/c.1/f-uvc.0"
+  cleanup_node "$GADGET_DIR/functions/$UVC_FUNC/control/class/fs/h"
+  cleanup_node "$GADGET_DIR/functions/$UVC_FUNC/control/class/ss/h"
+  cleanup_node "$GADGET_DIR/functions/$UVC_FUNC/streaming/header/h/u"
+  cleanup_node "$GADGET_DIR/functions/$UVC_FUNC/streaming/header/h/m"
+  cleanup_node "$GADGET_DIR/functions/$UVC_FUNC/streaming/class/fs/h"
+  cleanup_node "$GADGET_DIR/functions/$UVC_FUNC/streaming/class/hs/h"
+  cleanup_node "$GADGET_DIR/functions/$UVC_FUNC/streaming/class/ss/h"
 fi
 
 set_usb_device_role
@@ -370,6 +378,13 @@ write_cfg 666666 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwDefaultFrameInter
 write_cfg_lines "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwFrameInterval" 666666 333333
 
 # Link control/streaming headers into class directories.
+cleanup_node "functions/$UVC_FUNC/control/class/fs/h"
+cleanup_node "functions/$UVC_FUNC/control/class/ss/h"
+cleanup_node "functions/$UVC_FUNC/streaming/header/h/u"
+cleanup_node "functions/$UVC_FUNC/streaming/header/h/m"
+cleanup_node "functions/$UVC_FUNC/streaming/class/fs/h"
+cleanup_node "functions/$UVC_FUNC/streaming/class/hs/h"
+cleanup_node "functions/$UVC_FUNC/streaming/class/ss/h"
 ln -s header/h "functions/$UVC_FUNC/control/class/fs/h" 2>/dev/null || true
 ln -s header/h "functions/$UVC_FUNC/control/class/ss/h" 2>/dev/null || true
 ln -s ../../uncompressed/u "functions/$UVC_FUNC/streaming/header/h/u" 2>/dev/null || true
