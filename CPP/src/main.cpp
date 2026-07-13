@@ -1378,6 +1378,36 @@ bool open_writer(Options& options, cv::VideoWriter& writer) {
     const int requested_width = options.width;
     const int requested_height = options.height;
 
+    auto try_gstreamer_v4l2sink = [&](const cv::Size& size, int fps) -> bool {
+        if (options.output.rfind("/dev/video", 0) != 0) {
+            return false;
+        }
+        std::ostringstream pipeline;
+        pipeline
+            << "appsrc is-live=true do-timestamp=true format=time "
+            << "! videoconvert "
+            << "! video/x-raw,format=YUY2,width=" << size.width
+            << ",height=" << size.height
+            << ",framerate=" << fps << "/1 "
+            << "! v4l2sink device=" << options.output << " sync=false";
+
+        writer.release();
+        writer.open(pipeline.str(), cv::CAP_GSTREAMER, 0, static_cast<double>(fps), size, true);
+        if (!writer.isOpened()) {
+            return false;
+        }
+
+        options.width = size.width;
+        options.height = size.height;
+        options.fps = fps;
+        if (options.width != requested_width || options.height != requested_height) {
+            std::cerr << "usb output fallback size: " << requested_width << 'x' << requested_height
+                      << " -> " << options.width << 'x' << options.height << '\n';
+        }
+        std::cerr << "usb output backend fallback: CAP_GSTREAMER(v4l2sink)\n";
+        return true;
+    };
+
     // Some vendor kernels need the gadget node to settle after bind.
     for (int attempt = 0; attempt < 6; ++attempt) {
         for (const int backend : backends) {
@@ -1402,6 +1432,16 @@ bool open_writer(Options& options, cv::VideoWriter& writer) {
                 }
             }
         }
+
+        // Fallback for boards where CAP_V4L2 cannot open gadget output directly.
+        for (const int fps : fps_candidates) {
+            for (const auto& size : sizes) {
+                if (try_gstreamer_v4l2sink(size, fps)) {
+                    return true;
+                }
+            }
+        }
+
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
 
