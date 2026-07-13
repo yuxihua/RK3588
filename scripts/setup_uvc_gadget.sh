@@ -11,6 +11,7 @@ CONFIGFS=/sys/kernel/config
 GADGET_DIR="$CONFIGFS/usb_gadget/rk3588_uvc"
 UDC_NAME=""
 UVC_FUNC="uvc.0"
+USB_GADGET_FORCE_CONFIGFS="${USB_GADGET_FORCE_CONFIGFS:-0}"
 
 has_usbdevice_service() {
   local load_state
@@ -19,6 +20,10 @@ has_usbdevice_service() {
 }
 
 try_vendor_usbdevice_and_exit() {
+  if [[ "$USB_GADGET_FORCE_CONFIGFS" == "1" ]]; then
+    return 1
+  fi
+
   if ! command -v /usr/bin/usbdevice >/dev/null 2>&1; then
     return 1
   fi
@@ -201,6 +206,10 @@ fallback_vendor_usbdevice() {
 if [[ ! -d "$CONFIGFS" ]]; then
   echo "configfs 未挂载，先执行: mount -t configfs none /sys/kernel/config" >&2
   exit 1
+fi
+
+if [[ "$USB_GADGET_FORCE_CONFIGFS" == "1" ]]; then
+  echo "USB_GADGET_FORCE_CONFIGFS=1，跳过 vendor usbdevice，使用原生 configfs UVC。"
 fi
 
 try_vendor_usbdevice_and_exit

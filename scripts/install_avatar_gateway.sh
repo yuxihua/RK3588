@@ -176,6 +176,9 @@ fi
 if ! grep -q '^FPS=' "$ENV_FILE"; then
   echo 'FPS=15' >> "$ENV_FILE"
 fi
+if ! grep -q '^USB_GADGET_FORCE_CONFIGFS=' "$ENV_FILE"; then
+  echo 'USB_GADGET_FORCE_CONFIGFS=1' >> "$ENV_FILE"
+fi
 
 # Migrate legacy defaults from older installs so virtual avatar works out-of-box.
 if grep -q '^AVATAR_NAME=avatar$' "$ENV_FILE"; then
@@ -218,8 +221,7 @@ fi
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=RK3588 USB Avatar Gateway
-After=network.target local-fs.target usbdevice.service uvc-gadget-setup.service
-Requires=usbdevice.service
+After=network.target local-fs.target uvc-gadget-setup.service
 Wants=uvc-gadget-setup.service
 
 [Service]
@@ -274,6 +276,7 @@ Before=avatar-gateway.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+EnvironmentFile=-$ENV_FILE
 ExecStart=$INSTALL_ROOT/scripts/setup_uvc_gadget.sh
 
 [Install]
@@ -281,8 +284,10 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable usbdevice.service 2>/dev/null || true
 systemctl enable uvc-gadget-setup.service 2>/dev/null || true
+if grep -q '^USB_GADGET_FORCE_CONFIGFS=1$' "$ENV_FILE"; then
+  systemctl disable --now usbdevice.service 2>/dev/null || true
+fi
 systemctl enable --now avatar-gateway
 
 echo "已安装并启动 avatar-gateway 服务。"

@@ -46,6 +46,15 @@ sudo bash scripts/install_avatar_gateway.sh
 sudo bash scripts/setup_uvc_gadget.sh
 ```
 
+如果你的系统自带 `usbdevice` 服务并且与 UVC gadget 冲突（例如反复 bind/unbind 或长期 `not attached`），可强制使用原生 configfs 流程：
+
+```bash
+sudo sed -i '/^USB_GADGET_FORCE_CONFIGFS=/d' /etc/default/avatar-gateway
+echo 'USB_GADGET_FORCE_CONFIGFS=1' | sudo tee -a /etc/default/avatar-gateway
+sudo systemctl disable --now usbdevice.service
+sudo systemctl restart uvc-gadget-setup.service
+```
+
 4. C++ 运行时源码放在 `CPP/` 下，建议先构建再启动：
 
 ```bash
