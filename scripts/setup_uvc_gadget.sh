@@ -116,6 +116,7 @@ link_uvc_function() {
   # configfs is picky about how function links are created; try common forms.
   rm -f "$GADGET_DIR/configs/c.1/$UVC_FUNC" 2>/dev/null || true
   rm -f "$GADGET_DIR/configs/c.1/f1" 2>/dev/null || true
+  rm -f "$GADGET_DIR/configs/c.1/f-uvc.0" 2>/dev/null || true
 
   # Some vendor kernels require target relative to configs/c.1.
   (
@@ -143,6 +144,20 @@ link_uvc_function() {
     ln -s "functions/$UVC_FUNC" "configs/c.1/f1" 2>/dev/null || true
   )
   [[ -L "$GADGET_DIR/configs/c.1/f1" ]] && return 0
+
+  # Rockchip vendor kernels often use f-uvc.* naming.
+  (
+    cd "$GADGET_DIR"
+    ln -s "functions/$UVC_FUNC" "configs/c.1/f-uvc.0" 2>/dev/null || true
+  )
+  [[ -L "$GADGET_DIR/configs/c.1/f-uvc.0" ]] && return 0
+
+  # Last relative style seen on vendor trees.
+  (
+    cd "$GADGET_DIR/configs/c.1"
+    ln -s "../../../../usb_gadget/$(basename "$GADGET_DIR")/functions/$UVC_FUNC" "f-uvc.0" 2>/dev/null || true
+  )
+  [[ -L "$GADGET_DIR/configs/c.1/f-uvc.0" ]] && return 0
 
   # Last fallback with absolute target.
   (
@@ -179,6 +194,10 @@ write_cfg_lines() {
 fallback_vendor_usbdevice() {
   local service_name="usbdevice.service"
   local udc_file
+
+  if [[ "$USB_GADGET_FORCE_CONFIGFS" == "1" ]]; then
+    return 1
+  fi
 
   # If board vendor manages gadget via usbdevice, delegate to it.
   if ! command -v systemctl >/dev/null 2>&1; then
