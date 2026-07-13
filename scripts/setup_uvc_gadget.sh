@@ -231,7 +231,8 @@ if [[ "$USB_GADGET_FORCE_CONFIGFS" == "1" ]]; then
   echo "USB_GADGET_FORCE_CONFIGFS=1，跳过 vendor usbdevice，使用原生 configfs UVC。"
 fi
 
-try_vendor_usbdevice_and_exit
+# Continue with native configfs flow when vendor path is unavailable or disabled.
+try_vendor_usbdevice_and_exit || true
 
 if [[ -d "$GADGET_DIR" ]]; then
   if [[ -e "$GADGET_DIR/UDC" ]]; then
