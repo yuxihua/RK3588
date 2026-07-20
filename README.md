@@ -235,3 +235,244 @@ AVATAR_GPIO_11=avatar_11
 ## 说明
 
 如果你的板子没有 UVC gadget 能力，或者没有可用的 OTG 口，这个方案就无法直接变成 USB 虚拟摄像头。那种情况下只能改成 RTSP、NFS、WebRTC，或者增加一个支持 gadget 的 USB 控制器。
+
+## UVC 排障重点
+
+如果你现在的目标是解决 UVC gadget 不附着、一直显示 `not attached`，请优先只看 RK3588 的 USB3 Type-C OTG 这一路，不要把它和板上的 USB2-A 主机口混在一起看。
+
+这块板子上，USB3 口走的是 Type-C / OTG / VBUS / extcon 角色链路；USB2-A 主机口是另一条链路，通常不会直接决定 UVC 是否能枚举。真正需要确认的是：
+
+1. `usb@fc000000` 或对应的 dwc3 节点是否已经强制成 `dr_mode = "peripheral"`。
+2. 这一路是否还挂着 `extcon`、`usb-role-switch` 或 `role-switch-default-mode`，如果有，先删掉。
+3. OTG PHY 是否有稳定的 `vbus-supply`，必要时先用固定 5V regulator 做最小验证。
+4. 同一路上的 host 节点是否还在初始化，如果还在，先临时禁掉，排除角色被抢回 host 的情况。
+
+建议先按下面的最小改法试一轮，只改 UVC 这一路：
+
+```dts
+&usbdrd_dwc3_0 {
+	status = "okay";
+	dr_mode = "peripheral";
+	maximum-speed = "high-speed";
+
+	/delete-property/ extcon;
+	/delete-property/ usb-role-switch;
+	/delete-property/ role-switch-default-mode;
+};
+```
+
+如果你的 BSP 节点名不是 `usbdrd_dwc3_0`，就把上面的节点替换成实际生效的那一个，但修改思路保持不变：先把这一路固定成 device，再验证 UDC 是否能从 `not attached` 变成 `attached` 或 `configured`。
+
+### 最小实验版
+
+如果你只想先验证“USB3 Type-C OTG 这一路能不能稳定进 device 模式”，先只改最少的几项：
+
+```dts
+&usbdrd_dwc3_0 {
+	status = "okay";
+	dr_mode = "peripheral";
+	maximum-speed = "high-speed";
+
+	/delete-property/ extcon;
+	/delete-property/ usb-role-switch;
+	/delete-property/ role-switch-default-mode;
+};
+```
+
+这版的目的不是一次性把所有问题修完，而是先确认 UDC 能不能从 `not attached` 变成 `attached`。如果这一版都不行，说明问题还在角色链路，不在 UVC 描述符或应用层。
+
+### 强制专用口
+
+如果最小实验版仍然会被拉回 host，可以再把这一路做成“只给 gadget 用”的专用口：
+
+```dts
+vcc5v0_usb_gadget: vcc5v0-usb-gadget {
+	compatible = "regulator-fixed";
+	regulator-name = "vcc5v0_usb_gadget";
+	regulator-min-microvolt = <5000000>;
+	regulator-max-microvolt = <5000000>;
+	regulator-always-on;
+	regulator-boot-on;
+};
+
+&usb2phy0_otg {
+	status = "okay";
+	phy-supply = <&vcc5v0_usb_gadget>;
+};
+
+&usb2phy0_otg_port {
+	status = "okay";
+	phy-supply = <&vcc5v0_usb_gadget>;
+	vbus-supply = <&vcc5v0_usb_gadget>;
+};
+
+&usbdrd_dwc3_0 {
+	status = "okay";
+	dr_mode = "peripheral";
+	maximum-speed = "high-speed";
+
+	/delete-property/ extcon;
+	/delete-property/ usb-role-switch;
+	/delete-property/ role-switch-default-mode;
+};
+```
+
+这个版本的目标是尽量把 OTG 角色判断链简化掉，让 DWC3 只当 gadget 用。不同 BSP 的节点名可能略有差异，如果你的原理图或 DTS 里不是 `usb2phy0_otg` / `usb2phy0_otg_port`，就替换成对应的实际节点名。
+
+### 验证顺序
+
+改完以后，先不要跑复杂的 UVC 业务，只验证这几个状态：
+
+1. 启动后看 `/sys/class/udc/fc000000.usb/state` 是否还停在 `not attached`。
+2. 看 extcon 状态里是否还长期显示 `USB-HOST=1`。
+3. 先起最小 ACM gadget，再起 UVC gadget，确认是“角色链路没起来”还是“UVC 描述符/函数协商失败”。
+4. 只要最小 ACM 都不稳，就继续回头查 extcon、Type-C controller 和同口 host 节点，而不是继续调应用层。
+
+### 具体操作指令
+
+如果你要自己改源码，按下面顺序做。
+
+1. 找到板级 DTS 文件。
+
+在内核源码树里执行：
+
+```bash
+grep -RIn "usb@fc000000\|usbdrd_dwc3_0\|usb2phy0_otg\|extcon\|usb-role-switch\|role-switch-default-mode" arch/ arm64/ dts/
+```
+
+你要找到的是 NanoPi M6V2 实际使用的板级 dts 或 dtsi 文件，不是通用 rk3588 文件。
+
+如果你只想要一个固定格式，可以按下面这个模板来改：
+
+```bash
+# 1) 找到板级 DTS
+grep -RIn "usb@fc000000\|usbdrd_dwc3_0\|usb2phy0_otg\|extcon\|usb-role-switch\|role-switch-default-mode" arch/ arm64/ dts/
+
+# 2) 打开找到的板级 dts/dtsi 文件，把 USB3 Type-C OTG 这一路改成 device
+#    需要替换成你实际找到的节点名和文件名
+
+# 3) 重新编译 dtb
+make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- <你的 dtb 目标>
+
+# 4) 替换到当前系统正在使用的 dtb
+#    如果是 boot 分区就替换 boot 里的 dtb；如果是 resource 分区就替换打包后的 dtb
+
+# 5) 重启后先看 UDC 状态
+cat /sys/class/udc/fc000000.usb/state
+
+# 6) 先验证最小 ACM gadget，再验证 UVC gadget
+dmesg | grep -Ei 'dwc3|gadget|extcon|typec|usb'
+```
+
+模板里你只需要替换两个地方：
+
+1. `<你的 dtb 目标>`，换成你工程里实际的 dtb 编译目标。
+2. 节点名和文件名，换成你在第 1 步里找到的 NanoPi M6V2 板级源码。
+
+如果你要的是能直接照着敲的命令格式，可以按下面这个顺序来：
+
+```bash
+# 进入你的内核源码树
+cd /path/to/your/kernel-source
+
+# 搜索和 USB OTG 相关的节点
+grep -RIn "usb@fc000000\|usbdrd_dwc3_0\|usb2phy0_otg\|extcon\|usb-role-switch\|role-switch-default-mode" arch/arm64/boot/dts/
+
+# 打开找到的板级 dts/dtsi 文件，改 USB3 Type-C OTG 这一路
+# 例如：vim arch/arm64/boot/dts/rockchip/<your-board>.dts
+
+# 编译 dtb
+make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- <your-dtb-target>
+
+# 看编译结果
+ls -l arch/arm64/boot/dts/rockchip/*.dtb
+
+# 把编出来的 dtb 替换到你的启动介质里
+# 如果是 boot 分区，就替换 boot 里的 dtb
+# 如果是 resource 分区，就替换打包后的 dtb
+
+# 重启后先看 UDC
+cat /sys/class/udc/fc000000.usb/state
+
+# 再看内核日志
+dmesg | grep -Ei 'dwc3|gadget|extcon|typec|usb'
+```
+
+如果你是从 WSL 或 Windows 这边改源码，可以先在 Windows 终端里打开源码目录，再进入 WSL/Ubuntu 编译环境执行上面的命令；重点是命令顺序不要变：先 grep 找文件，再改 dts，再编 dtb，最后替换和验证。
+
+2. 修改 USB3 Type-C OTG 这一路。
+
+把对应节点改成下面这种最小版本：
+
+```dts
+&usbdrd_dwc3_0 {
+	status = "okay";
+	dr_mode = "peripheral";
+	maximum-speed = "high-speed";
+
+	/delete-property/ extcon;
+	/delete-property/ usb-role-switch;
+	/delete-property/ role-switch-default-mode;
+};
+```
+
+如果你的节点名不是 `usbdrd_dwc3_0`，就改成实际存在的那个节点名，但修改思路不变。
+
+3. 如果最小版本还不行，再加固定 5V 供电。
+
+在同一个 dts 里加入一个固定 regulator，再把 OTG PHY 绑过去：
+
+```dts
+vcc5v0_usb_gadget: vcc5v0-usb-gadget {
+	compatible = "regulator-fixed";
+	regulator-name = "vcc5v0_usb_gadget";
+	regulator-min-microvolt = <5000000>;
+	regulator-max-microvolt = <5000000>;
+	regulator-always-on;
+	regulator-boot-on;
+};
+
+&usb2phy0_otg {
+	status = "okay";
+	phy-supply = <&vcc5v0_usb_gadget>;
+};
+
+&usb2phy0_otg_port {
+	status = "okay";
+	phy-supply = <&vcc5v0_usb_gadget>;
+	vbus-supply = <&vcc5v0_usb_gadget>;
+};
+```
+
+4. 如果同口还有 host 控制器，就先禁掉。
+
+如果你在同一路物理口上看到了 xhci、ehci、ohci 之类节点，先把它们临时设成 disabled，只保留 gadget 侧，避免角色被 host 抢回去。
+
+5. 编译 dtb。
+
+在内核源码目录执行：
+
+```bash
+make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- <板级 dtb 目标>
+```
+
+如果你用的是 FriendlyElec 的现成内核树，也可以直接编译整个 dtb 目标，再从输出目录拿到新的 dtb 文件。
+
+6. 刷入新 dtb 并重启。
+
+如果你的系统是通过 resource 分区或打包镜像加载 dtb，就把新 dtb 按当前启动链路替换进去；如果是直接从 boot 分区加载，就替换 boot 里的 dtb。
+
+7. 先做最小 ACM 验证，再做 UVC 验证。
+
+重启后先执行：
+
+```bash
+cat /sys/class/udc/fc000000.usb/state
+dmesg | grep -Ei 'dwc3|gadget|extcon|typec|usb'
+```
+
+然后先起最小 ACM gadget。只要 ACM 还是不稳定，就先别继续调 UVC。
+
+8. 只有 ACM 稳了，再回到 UVC。
+
+如果 ACM 已经能稳定枚举，再启用 UVC gadget，重点看 `/sys/class/udc/fc000000.usb/state` 是否进入 `attached` 或 `configured`，以及 Windows 端是否正确识别虚拟摄像头。

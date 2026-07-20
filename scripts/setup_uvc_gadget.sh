@@ -15,6 +15,7 @@ UVC_FUNC="${USB_GADGET_UVC_FUNC:-uvc.gs7}"
 CFG_NAME="${USB_GADGET_CFG_NAME:-b.1}"
 CFG_DIR="configs/$CFG_NAME"
 USB_GADGET_FORCE_CONFIGFS="${USB_GADGET_FORCE_CONFIGFS:-0}"
+USB_GADGET_UVC_MINIMAL="${USB_GADGET_UVC_MINIMAL:-0}"
 
 ensure_cfg_dir() {
   local requested="${1:-$CFG_NAME}"
@@ -247,6 +248,12 @@ write_cfg_lines() {
   } > "$path" 2>/dev/null || true
 }
 
+require_symlink() {
+  local path="$1"
+
+  [[ -L "$path" ]]
+}
+
 fallback_vendor_usbdevice() {
   local service_name="usbdevice.service"
   local udc_file
@@ -346,8 +353,11 @@ mkdir -p "functions/$UVC_FUNC/streaming/header"
 mkdir -p "functions/$UVC_FUNC/streaming/header/h"
 mkdir -p "functions/$UVC_FUNC/streaming/class"
 mkdir -p "functions/$UVC_FUNC/streaming/uncompressed/u/240p"
-mkdir -p "functions/$UVC_FUNC/streaming/mjpeg/m/240p"
 mkdir -p "functions/$UVC_FUNC/streaming/color_matching/default"
+
+if [[ "$USB_GADGET_UVC_MINIMAL" != "1" ]]; then
+  mkdir -p "functions/$UVC_FUNC/streaming/mjpeg/m/240p"
+fi
 
 # Uncompressed YUYV 320x240 @ 15/30 fps
 write_cfg 1 "functions/$UVC_FUNC/streaming/uncompressed/u/bFormatIndex"
@@ -364,18 +374,20 @@ write_cfg 153600 "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwMaxVideoFr
 write_cfg 666666 "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwDefaultFrameInterval"
 write_cfg_lines "functions/$UVC_FUNC/streaming/uncompressed/u/240p/dwFrameInterval" 666666 333333
 
-# MJPEG 320x240 @ 15/30 fps
-write_cfg 2 "functions/$UVC_FUNC/streaming/mjpeg/m/bFormatIndex"
-write_cfg 1 "functions/$UVC_FUNC/streaming/mjpeg/m/bNumFrameDescriptors"
+if [[ "$USB_GADGET_UVC_MINIMAL" != "1" ]]; then
+  # MJPEG 320x240 @ 15/30 fps
+  write_cfg 2 "functions/$UVC_FUNC/streaming/mjpeg/m/bFormatIndex"
+  write_cfg 1 "functions/$UVC_FUNC/streaming/mjpeg/m/bNumFrameDescriptors"
 
-write_cfg 1 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/bFrameIndex"
-write_cfg 320 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/wWidth"
-write_cfg 240 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/wHeight"
-write_cfg 1152000 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwMinBitRate"
-write_cfg 4608000 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwMaxBitRate"
-write_cfg 153600 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwMaxVideoFrameBufferSize"
-write_cfg 666666 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwDefaultFrameInterval"
-write_cfg_lines "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwFrameInterval" 666666 333333
+  write_cfg 1 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/bFrameIndex"
+  write_cfg 320 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/wWidth"
+  write_cfg 240 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/wHeight"
+  write_cfg 1152000 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwMinBitRate"
+  write_cfg 4608000 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwMaxBitRate"
+  write_cfg 153600 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwMaxVideoFrameBufferSize"
+  write_cfg 666666 "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwDefaultFrameInterval"
+  write_cfg_lines "functions/$UVC_FUNC/streaming/mjpeg/m/240p/dwFrameInterval" 666666 333333
+fi
 
 # Link control/streaming headers into class directories.
 cleanup_node "functions/$UVC_FUNC/control/class/fs/h"
@@ -388,10 +400,12 @@ cleanup_node "functions/$UVC_FUNC/streaming/class/ss/h"
 ln -s header/h "functions/$UVC_FUNC/control/class/fs/h" 2>/dev/null || true
 ln -s header/h "functions/$UVC_FUNC/control/class/ss/h" 2>/dev/null || true
 ln -s ../../uncompressed/u "functions/$UVC_FUNC/streaming/header/h/u" 2>/dev/null || true
-ln -s ../../mjpeg/m "functions/$UVC_FUNC/streaming/header/h/m" 2>/dev/null || true
 ln -s ../../header/h "functions/$UVC_FUNC/streaming/class/fs/h" 2>/dev/null || true
 ln -s ../../header/h "functions/$UVC_FUNC/streaming/class/hs/h" 2>/dev/null || true
 ln -s ../../header/h "functions/$UVC_FUNC/streaming/class/ss/h" 2>/dev/null || true
+if [[ "$USB_GADGET_UVC_MINIMAL" != "1" ]]; then
+  ln -s ../../mjpeg/m "functions/$UVC_FUNC/streaming/header/h/m" 2>/dev/null || true
+fi
 if ! link_uvc_function; then
   echo "无法把 functions/$UVC_FUNC 链接到 $CFG_DIR，UVC 配置不完整。" >&2
   ls -la "functions" >&2 || true
@@ -399,6 +413,26 @@ if ! link_uvc_function; then
   if fallback_vendor_usbdevice; then
     exit 0
   fi
+  exit 1
+fi
+
+if ! require_symlink "functions/$UVC_FUNC/control/class/fs/h" || \
+   ! require_symlink "functions/$UVC_FUNC/control/class/ss/h" || \
+   ! require_symlink "functions/$UVC_FUNC/streaming/header/h/u" || \
+   ! require_symlink "functions/$UVC_FUNC/streaming/class/fs/h" || \
+   ! require_symlink "functions/$UVC_FUNC/streaming/class/hs/h" || \
+   ! require_symlink "functions/$UVC_FUNC/streaming/class/ss/h"; then
+  echo "UVC 内部链接未全部创建成功，停止绑定 UDC。" >&2
+  ls -la "functions/$UVC_FUNC/control/class" >&2 || true
+  ls -la "functions/$UVC_FUNC/streaming/header/h" >&2 || true
+  ls -la "functions/$UVC_FUNC/streaming/class" >&2 || true
+  exit 1
+fi
+
+if [[ "$USB_GADGET_UVC_MINIMAL" != "1" ]] && \
+   ! require_symlink "functions/$UVC_FUNC/streaming/header/h/m"; then
+  echo "MJPEG 链接未创建成功，停止绑定 UDC。" >&2
+  ls -la "functions/$UVC_FUNC/streaming/header/h" >&2 || true
   exit 1
 fi
 
